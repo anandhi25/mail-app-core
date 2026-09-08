@@ -18,29 +18,45 @@ class ImapController extends Controller
     {
         $user = $request->user();
         $password = cache()->get("imap_pwd_{$user->id}");
-        if (!$password) { throw new \Exception("IMAP password not found in session."); }
+        if (! $password) {
+            throw new \Exception('IMAP password not found in session.');
+        }
         $password = decrypt($password);
 
-        $client = \Webklex\IMAP\Facades\Client::make([
-            "host"  => config('imap.default.IMAP_HOST', '127.0.0.1'),
-            "port"  => config('imap.default.IMAP_PORT', 993),
-            "encryption" => config('imap.default.IMAP_ENCRYPTION', 'ssl'),
-            "validate_cert" => config('imap.default.IMAP_VALIDATE_CERT', false),
-            "username" => $user->email,
-            "password" => $password,
-            "protocol" => "imap"
+        $client = Client::make([
+            'host' => config('imap.accounts.default.host'),
+            'port' => config('imap.accounts.default.port'),
+            'encryption' => config('imap.accounts.default.encryption'),
+            'validate_cert' => config('imap.accounts.default.validate_cert'),
+            'username' => explode('@', $user->email)[0],
+            'password' => $password,
+            'protocol' => 'imap',
         ]);
         $client->connect();
+        $this->ensureStandardFolders($client);
+
         return $client;
+    }
+
+    private function ensureStandardFolders(\Webklex\PHPIMAP\Client $client): void
+    {
+        $existing = $client->getFolders(false)->map(fn ($f) => $f->full_name)->toArray();
+        $required = array_values(config('imap.options.common_folders', []));
+
+        foreach ($required as $folder) {
+            if ($folder !== 'INBOX' && ! in_array($folder, $existing, true)) {
+                $client->createFolder($folder);
+            }
+        }
     }
 
     /**
      * List all folders (mailboxes).
      */
-    public function getFolders(): JsonResponse
+    public function getFolders(Request $request): JsonResponse
     {
         try {
-            $client = $this->getClient();
+            $client = $this->getClient($request);
             $folders = $client->getFolders();
 
             $result = [];
@@ -75,11 +91,15 @@ class ImapController extends Controller
         $perPage = $request->input('per_page', 15);
 
         try {
-            $client = $this->getClient();
+            $client = $this->getClient($request);
             $folder = $client->getFolder($folderName);
 
             // Paginate messages (latest first)
-            $messages = $folder->messages()->all()->limit($perPage, $page)->get();
+            // SET fetch_body false to drastically speed up inbox listing!
+            $messages = $folder->query()
+                ->setFetchBody(false)
+                ->limit($perPage, $page)
+                ->get();
 
             $result = [];
             foreach ($messages as $message) {
@@ -96,7 +116,7 @@ class ImapController extends Controller
             return response()->json([
                 'folder' => $folderName,
                 'page' => $page,
-                'messages' => $result
+                'messages' => $result,
             ]);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
@@ -112,11 +132,16 @@ class ImapController extends Controller
         $folderName = $request->input('folder');
 
         try {
-            $client = $this->getClient();
+            $client = $this->getClient($request);
             $folder = $client->getFolder($folderName);
-            $message = $folder->query()->getMessageByUid($uid);
 
-            if (!$message) {
+            // Set options properly to parse body completely but efficiently
+            $message = $folder->query()
+                ->setFetchBody(true)
+                ->setFetchAttachment(true)
+                ->getMessageByUid($uid);
+
+            if (! $message) {
                 return response()->json(['error' => 'Message not found'], 404);
             }
 
@@ -125,11 +150,11 @@ class ImapController extends Controller
 
             $attachments = [];
             foreach ($message->getAttachments() as $attachment) {
+                // Ignore small inline structural attachments if needed, but here we take all
                 $attachments[] = [
                     'name' => $attachment->getName(),
                     'mime' => $attachment->getMimeType(),
-                    // In a real app, you would save the attachment to Storage
-                    // and return a download URL here.
+                    'content' => base64_encode($attachment->getContent()),
                 ];
             }
 
@@ -137,7 +162,7 @@ class ImapController extends Controller
                 'uid' => $message->getUid(),
                 'subject' => $message->getSubject()[0] ?? '',
                 'from' => $message->getFrom()[0]->mail ?? '',
-                'to' => array_map(fn($t) => $t->mail, $message->getTo()->toArray()),
+                'to' => array_map(fn ($t) => $t->mail, $message->getTo()->toArray()),
                 'date' => $message->getDate()[0]->format('Y-m-d H:i:s'),
                 'body_html' => $message->getHTMLBody(),
                 'body_text' => $message->getTextBody(),
@@ -157,19 +182,60 @@ class ImapController extends Controller
         $folderName = $request->input('folder');
 
         try {
-            $client = $this->getClient();
+            $client = $this->getClient($request);
             $folder = $client->getFolder($folderName);
             $message = $folder->query()->getMessageByUid($uid);
 
-            if (!$message) {
+            if (! $message) {
                 return response()->json(['error' => 'Message not found'], 404);
             }
 
-            // Move to Trash folder or soft delete
-            $message->move('Trash');
-            // Or permanent delete: $message->delete();
+            // If already in Trash, delete permanently; otherwise move to Trash
+            if (strtolower($folderName) === 'trash') {
+                $message->delete(true);
+            } else {
+                $message->move('Trash');
+            }
 
             return response()->json(['message' => 'Message deleted successfully']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Delete multiple messages by UID in bulk.
+     */
+    public function bulkDelete(Request $request): JsonResponse
+    {
+        $request->validate([
+            'folder' => 'required|string',
+            'uids' => 'required|array|min:1',
+            'uids.*' => 'required|integer',
+        ]);
+
+        $folderName = $request->input('folder');
+        $uids = $request->input('uids');
+
+        try {
+            $client = $this->getClient($request);
+            $folder = $client->getFolder($folderName);
+
+            $deleted = 0;
+            $isPermanent = strtolower($folderName) === 'trash';
+            foreach ($uids as $uid) {
+                $message = $folder->query()->getMessageByUid($uid);
+                if ($message) {
+                    if ($isPermanent) {
+                        $message->delete(true);
+                    } else {
+                        $message->move('Trash');
+                    }
+                    $deleted++;
+                }
+            }
+
+            return response()->json(['message' => "{$deleted} message(s) deleted successfully.", 'deleted' => $deleted]);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -189,11 +255,11 @@ class ImapController extends Controller
         $destinationFolder = $request->input('destination_folder');
 
         try {
-            $client = $this->getClient();
+            $client = $this->getClient($request);
             $folder = $client->getFolder($folderName);
             $message = $folder->query()->getMessageByUid($uid);
 
-            if (!$message) {
+            if (! $message) {
                 return response()->json(['error' => 'Message not found'], 404);
             }
 

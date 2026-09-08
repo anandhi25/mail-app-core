@@ -38,6 +38,13 @@ export const imapApi = {
     api.get(`/webmail/messages/${uid}`, { params: { folder } }).then(res => res.data),
   deleteMessage: (folder: string, uid: number) =>
     api.delete(`/webmail/messages/${uid}`, { params: { folder } }).then(res => res.data),
+  bulkDelete: (folder: string, uids: number[]) =>
+    api.delete('/webmail/messages', { data: { folder, uids } }).then(res => res.data),
+};
+
+export const webmailProfileApi = {
+  getProfile: () => api.get("/webmail/profile").then(res => res.data),
+  updateProfile: (data: any) => api.put("/webmail/profile", data).then(res => res.data),
 };
 
 export const smtpApi = {
@@ -57,6 +64,7 @@ export const adminApi = {
   getMailUsers: (domainId: number) => api.get(`/admin/domains/${domainId}/users`).then(res => res.data),
   createMailUser: (domainId: number, data: any) => api.post(`/admin/domains/${domainId}/users`, data).then(res => res.data),
   deleteMailUser: (id: number) => api.delete(`/admin/users/${id}`).then(res => res.data),
+  triggerSync: (userId: number, data: any) => api.post(`/admin/users/${userId}/sync`, data).then(res => res.data),
 
   // Server Settings
   getConfigs: () => api.get('/admin/config').then(res => res.data),

@@ -10,12 +10,9 @@ const RECONNECT_DELAY_MS = 5_000;
 /**
  * Subscribe to realtime mail notifications via Server-Sent Events.
  *
- * Returns unread counts per folder that update in realtime as new mail
- * arrives. The connection reconnects automatically if it drops.
- *
- * @example
- * const { unreadCounts, isConnected } = useMailNotifications();
- * // unreadCounts => { INBOX: 3, Junk: 1, Drafts: 0 }
+ * Maintains one persistent connection per browser tab. The server pushes
+ * unread counts whenever they change — no polling from the client side.
+ * Reconnects automatically after network drops.
  */
 export function useMailNotifications() {
   const [unreadCounts, setUnreadCounts] = useState<UnreadCounts>({});
@@ -34,11 +31,9 @@ export function useMailNotifications() {
     clearReconnectTimer();
 
     const token = localStorage.getItem('auth_token');
-    if (!token) {
-      return;
-    }
+    if (!token) return;
 
-    // EventSource doesn't support custom headers natively — pass token via query param
+    // EventSource doesn't support custom headers — pass token via query param
     const url = `${SSE_URL}?token=${encodeURIComponent(token)}`;
     const es = new EventSource(url);
     eventSourceRef.current = es;
@@ -52,27 +47,21 @@ export function useMailNotifications() {
         const counts: UnreadCounts = JSON.parse(event.data);
         setUnreadCounts(counts);
       } catch {
-        // Malformed payload — ignore
+        // malformed payload — ignore
       }
-    });
-
-    es.addEventListener('error', () => {
-      // Don't log — SSE fires error on every reconnect cycle too
     });
 
     es.onerror = () => {
       setIsConnected(false);
       es.close();
       eventSourceRef.current = null;
-
-      // Schedule reconnect
+      // Auto-reconnect after delay
       reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
     };
   };
 
   useEffect(() => {
     connect();
-
     return () => {
       clearReconnectTimer();
       eventSourceRef.current?.close();

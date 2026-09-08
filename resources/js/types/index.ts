@@ -1,3 +1,9 @@
+export interface MessageAttachment {
+  name: string;
+  mime: string;
+  content: string; // base64
+}
+
 export interface Message {
   uid: number;
   subject: string;
@@ -8,6 +14,7 @@ export interface Message {
   has_attachments: boolean;
   body_html?: string;
   body_text?: string;
+  attachments?: MessageAttachment[];
 }
 
 export interface Folder {

@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Webmail\ImapController;
 use App\Http\Controllers\Api\Webmail\NotificationStreamController;
 use App\Http\Controllers\Api\Webmail\SmtpController;
 use App\Http\Controllers\Api\Webmail\WebmailAuthController;
+use App\Http\Controllers\Api\Webmail\WebmailProfileController;
 use App\Http\Middleware\AuthenticateMailUser;
 use App\Http\Middleware\AuthenticateSseToken;
 use Illuminate\Support\Facades\Route;
@@ -25,6 +26,7 @@ Route::prefix('v1/admin')->group(function () {
 
         // Mail Users (nested under domains for creation/listing)
         Route::apiResource('domains.users', MailUserController::class)->shallow();
+        Route::post('/users/{user}/sync', [MailUserController::class, 'triggerSync']);
 
         // Aliases (nested under domains for creation/listing)
         Route::apiResource('domains.aliases', AliasController::class)->shallow();
@@ -42,9 +44,14 @@ Route::prefix('v1/webmail')->group(function () {
     Route::middleware(AuthenticateMailUser::class)->group(function () {
         Route::post('/logout', [WebmailAuthController::class, 'logout']);
 
+        // Profile
+        Route::get('/profile', [WebmailProfileController::class, 'show']);
+        Route::put('/profile', [WebmailProfileController::class, 'update']);
+
         // IMAP / Inbox
         Route::get('/folders', [ImapController::class, 'getFolders']);
         Route::get('/messages', [ImapController::class, 'getMessages']);
+        Route::delete('/messages', [ImapController::class, 'bulkDelete']);
         Route::get('/messages/{uid}', [ImapController::class, 'getMessageDetail']);
         Route::delete('/messages/{uid}', [ImapController::class, 'deleteMessage']);
         Route::post('/messages/{uid}/move', [ImapController::class, 'moveMessage']);

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { adminApi } from '../../lib/api';
-import { Plus, Trash2, Mail } from 'lucide-react';
+import { Plus, Trash2, Mail, RefreshCw, X } from 'lucide-react';
 
 interface Domain { id: number; name: string; }
-interface MailUser { id: number; email: string; quota_bytes: number | null; created_at: string; }
+interface SyncJob { status: string; total_messages: number; synced_messages: number; error_log: string; }
+interface MailUser { id: number; email: string; quota_bytes: number | null; created_at: string; latest_sync_job?: SyncJob; }
 
 export default function UsersAdmin() {
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -15,6 +16,10 @@ export default function UsersAdmin() {
   const [emailPrefix, setEmailPrefix] = useState('');
   const [password, setPassword] = useState('');
 
+  const [syncUserId, setSyncUserId] = useState<number | null>(null);
+  const [syncData, setSyncData] = useState({ source_host: '', source_username: '', source_password: '', local_password: '' });
+  const [isSyncing, setIsSyncing] = useState(false);
+
   useEffect(() => {
     adminApi.getDomains().then(setDomains).catch(console.error);
   }, []);
@@ -22,6 +27,8 @@ export default function UsersAdmin() {
   useEffect(() => {
     if (selectedDomain) {
       loadUsers();
+      const t = setInterval(loadUsers, 5000); // Poll for sync status
+      return () => clearInterval(t);
     } else {
       setUsers([]);
     }
@@ -58,6 +65,23 @@ export default function UsersAdmin() {
       loadUsers();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to create mailbox');
+    }
+  };
+
+  
+  const handleTriggerSync = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!syncUserId) return;
+    setIsSyncing(true);
+    try {
+      await adminApi.triggerSync(syncUserId, syncData);
+      setSyncUserId(null);
+      setSyncData({ source_host: '', source_username: '', source_password: '', local_password: '' });
+      loadUsers();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to start migration');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -145,6 +169,7 @@ export default function UsersAdmin() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email Address</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quota</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Migration Status</th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
@@ -160,7 +185,29 @@ export default function UsersAdmin() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {user.quota_bytes ? `${(user.quota_bytes / 1024 / 1024).toFixed(2)} MB` : 'Unlimited'}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        {user.latest_sync_job ? (
+                          <div className="flex flex-col gap-1">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                              user.latest_sync_job.status === 'completed' ? 'bg-green-100 text-green-800' :
+                              user.latest_sync_job.status === 'failed' ? 'bg-red-100 text-red-800' :
+                              'bg-blue-100 text-blue-800 animate-pulse'
+                            }`}>
+                              {user.latest_sync_job.status.toUpperCase()}
+                            </span>
+                            {user.latest_sync_job.status === 'processing' && (
+                              <span className="text-xs text-gray-500">{user.latest_sync_job.synced_messages} / {user.latest_sync_job.total_messages} msgs</span>
+                            )}
+                            {user.latest_sync_job.status === 'failed' && (
+                              <span className="text-xs text-red-500 truncate max-w-[150px]" title={user.latest_sync_job.error_log}>Error occurred</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs">-</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button onClick={() => setSyncUserId(user.id)} title="Import / Sync Old Email" className="text-blue-600 hover:text-blue-900 mr-4"><RefreshCw className="w-5 h-5" /></button>
                         <button onClick={() => handleDelete(user.id)} className="text-red-600 hover:text-red-900">
                           <Trash2 className="w-5 h-5" />
                         </button>
@@ -172,6 +219,49 @@ export default function UsersAdmin() {
             </table>
           </div>
         </>
+      )}
+
+      {/* Sync Modal */}
+      {syncUserId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-semibold text-gray-900">IMAP Migration Sync</h3>
+              <button onClick={() => setSyncUserId(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5"/></button>
+            </div>
+            <form onSubmit={handleTriggerSync}>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-gray-500 mb-4">
+                  Connect to an old IMAP server (e.g. Zimbra) to import all messages (Inbox, Sent, Drafts, Spam) into this account.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Old Server IMAP Host</label>
+                  <input type="text" required value={syncData.source_host} onChange={e => setSyncData({...syncData, source_host: e.target.value})} className="w-full border-gray-300 rounded-lg py-2 px-3 border outline-none text-sm" placeholder="e.g. mail.zimbra-client.com" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Old Server Email / Username</label>
+                  <input type="text" required value={syncData.source_username} onChange={e => setSyncData({...syncData, source_username: e.target.value})} className="w-full border-gray-300 rounded-lg py-2 px-3 border outline-none text-sm" placeholder="user@old-domain.com" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Old Server Password</label>
+                  <input type="password" required value={syncData.source_password} onChange={e => setSyncData({...syncData, source_password: e.target.value})} className="w-full border-gray-300 rounded-lg py-2 px-3 border outline-none text-sm" placeholder="••••••••" />
+                </div>
+                <hr className="my-2 border-gray-100"/>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Current Password (Security Check)</label>
+                  <input type="password" required value={syncData.local_password} onChange={e => setSyncData({...syncData, local_password: e.target.value})} className="w-full border-gray-300 rounded-lg py-2 px-3 border outline-none text-sm" placeholder="Password for this local account" />
+                  <p className="text-[10px] text-gray-400 mt-1">Needed to push messages to Dovecot. Will be discarded after sync.</p>
+                </div>
+              </div>
+              <div className="px-6 py-4 bg-gray-50 flex justify-end gap-2 border-t border-gray-100">
+                <button type="button" onClick={() => setSyncUserId(null)} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={isSyncing} className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                  {isSyncing ? 'Starting...' : 'Start Migration'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

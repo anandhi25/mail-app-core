@@ -9,6 +9,8 @@ import Login from './pages/Login';
 import LoginAdmin from './pages/LoginAdmin';
 import DomainsAdmin from './pages/admin/DomainsAdmin';
 import UsersAdmin from './pages/admin/UsersAdmin';
+import SettingsAdmin from './pages/admin/SettingsAdmin';
+import Settings from "./pages/Settings";
 
 // Basic wrapper for Protected Routes
 const ProtectedRoute = () => {
@@ -36,7 +38,7 @@ function App() {
             <Route path="domains" element={<DomainsAdmin />} />
             <Route path="users" element={<UsersAdmin />} />
             <Route path="aliases" element={<div className="p-8">Aliases Management (Coming soon)</div>} />
-            <Route path="settings" element={<div className="p-8">Server Settings (Coming soon)</div>} />
+            <Route path="settings" element={<SettingsAdmin />} />
           </Route>
 
           {/* Webmail Routes */}
@@ -44,6 +46,7 @@ function App() {
             <Route index element={<Navigate to="/inbox" replace />} />
             <Route path=":folder" element={<Inbox />} />
             <Route path="drafts" element={<Drafts />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
         </Route>
       </Routes>

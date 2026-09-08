@@ -12,8 +12,8 @@ class NotificationStreamController extends Controller
     /**
      * Stream realtime mail notifications via Server-Sent Events.
      *
-     * Polls IMAP every 30 seconds and pushes unread counts per folder.
-     * The client reconnects automatically if the connection drops.
+     * Opens one persistent IMAP connection per user session, polls every 30 s,
+     * and pushes unread counts only when they change — just like Zimbra/Roundcube.
      */
     public function __invoke(Request $request): StreamedResponse
     {
@@ -21,11 +21,41 @@ class NotificationStreamController extends Controller
             $this->configureStream();
 
             $user = $request->user();
-            $lastUnreadCounts = [];
-            $pollIntervalSeconds = 30;
+            $password = cache()->get("imap_pwd_{$user->id}");
 
-            // Send initial connection confirmation
-            $this->sendEvent('connected', ['message' => 'SSE connected', 'user' => $user->email]);
+            if (! $password) {
+                $this->sendEvent('error', ['message' => 'IMAP session expired. Please log in again.']);
+
+                return;
+            }
+
+            $password = decrypt($password);
+
+            // Open one persistent IMAP connection for the lifetime of this SSE stream
+            $client = Client::make([
+                'host' => config('imap.accounts.default.host'),
+                'port' => config('imap.accounts.default.port'),
+                'encryption' => config('imap.accounts.default.encryption'),
+                'validate_cert' => config('imap.accounts.default.validate_cert'),
+                'username' => explode('@', $user->email)[0],
+                'password' => $password,
+                'protocol' => 'imap',
+            ]);
+
+            try {
+                $client->connect();
+            } catch (\Exception $e) {
+                $this->sendEvent('error', ['message' => 'IMAP connection failed.']);
+
+                return;
+            }
+
+            // Confirm connection to the frontend
+            $this->sendEvent('connected', ['user' => $user->email]);
+
+            $lastCounts = [];
+            $foldersToWatch = ['INBOX', 'Drafts', 'Sent', 'Spam', 'Trash'];
+            $pollIntervalSeconds = 30;
 
             while (true) {
                 if (connection_aborted()) {
@@ -33,71 +63,41 @@ class NotificationStreamController extends Controller
                 }
 
                 try {
-                    $unreadCounts = $this->fetchUnreadCounts($request);
-
-                    // Only push event if counts have changed (avoid noise)
-                    if ($unreadCounts !== $lastUnreadCounts) {
-                        $this->sendEvent('mail.unread', $unreadCounts);
-                        $lastUnreadCounts = $unreadCounts;
+                    // Re-use existing connection; reconnect if dropped
+                    if (! $client->isConnected()) {
+                        $client->connect();
                     }
-                } catch (\Exception $e) {
-                    $this->sendEvent('error', ['message' => 'Failed to fetch mail data']);
+
+                    $counts = [];
+                    foreach ($foldersToWatch as $folderName) {
+                        try {
+                            $folder = $client->getFolder($folderName);
+                            $counts[$folderName] = $folder->messages()->unseen()->count();
+                        } catch (\Exception) {
+                            $counts[$folderName] = 0;
+                        }
+                    }
+
+                    // Push event only when counts change (no noise)
+                    if ($counts !== $lastCounts) {
+                        $this->sendEvent('mail.unread', $counts);
+                        $lastCounts = $counts;
+                    }
+                } catch (\Exception) {
+                    // Transient IMAP error — skip this cycle, try next
                 }
 
-                // Send a heartbeat comment to keep the connection alive
                 $this->sendHeartbeat();
 
                 sleep($pollIntervalSeconds);
             }
+
+            $client->disconnect();
         }, 200, $this->streamHeaders());
     }
 
     /**
-     * Fetch unread message counts from IMAP for key folders.
-     *
-     * @return array<string, int>
-     */
-    private function fetchUnreadCounts(Request $request): array
-    {
-        $user = $request->user();
-        $password = cache()->get("imap_pwd_{$user->id}");
-
-        if (! $password) {
-            throw new \Exception('IMAP password not cached.');
-        }
-
-        $password = decrypt($password);
-
-        $client = Client::make([
-            'host' => config('imap.default.IMAP_HOST', '127.0.0.1'),
-            'port' => config('imap.default.IMAP_PORT', 993),
-            'encryption' => config('imap.default.IMAP_ENCRYPTION', 'ssl'),
-            'validate_cert' => config('imap.default.IMAP_VALIDATE_CERT', false),
-            'username' => $user->email,
-            'password' => $password,
-            'protocol' => 'imap',
-        ]);
-        $client->connect();
-
-        $counts = [];
-        $foldersToWatch = ['INBOX', 'Junk', 'Drafts'];
-
-        foreach ($foldersToWatch as $folderName) {
-            try {
-                $folder = $client->getFolder($folderName);
-                $counts[$folderName] = $folder->messages()->unseen()->count();
-            } catch (\Exception) {
-                $counts[$folderName] = 0;
-            }
-        }
-
-        $client->disconnect();
-
-        return $counts;
-    }
-
-    /**
-     * Write a named SSE event with JSON payload to the output buffer.
+     * Write a named SSE event with JSON payload.
      *
      * @param  array<string, mixed>  $data
      */
@@ -106,27 +106,31 @@ class NotificationStreamController extends Controller
         echo "event: {$eventName}\n";
         echo 'data: '.json_encode($data)."\n\n";
 
-        ob_flush();
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
         flush();
     }
 
     /**
-     * Send an SSE comment as a keep-alive heartbeat.
+     * SSE comment heartbeat — keeps proxies and load balancers from closing the connection.
      */
     private function sendHeartbeat(): void
     {
         echo ': heartbeat '.time()."\n\n";
 
-        ob_flush();
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
         flush();
     }
 
     /**
-     * Disable output buffering so data reaches the client immediately.
+     * Disable output buffering so events reach the client immediately.
      */
     private function configureStream(): void
     {
-        if (ob_get_level()) {
+        while (ob_get_level() > 0) {
             ob_end_clean();
         }
 
@@ -136,8 +140,6 @@ class NotificationStreamController extends Controller
     }
 
     /**
-     * Required HTTP headers for SSE.
-     *
      * @return array<string, string>
      */
     private function streamHeaders(): array
@@ -145,7 +147,7 @@ class NotificationStreamController extends Controller
         return [
             'Content-Type' => 'text/event-stream',
             'Cache-Control' => 'no-cache, no-store',
-            'X-Accel-Buffering' => 'no',   // Disable nginx buffering
+            'X-Accel-Buffering' => 'no',
             'Connection' => 'keep-alive',
         ];
     }

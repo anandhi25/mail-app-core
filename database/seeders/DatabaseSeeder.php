@@ -26,16 +26,16 @@ class DatabaseSeeder extends Seeder
     
 
 
-        // Domain
+        // Domain — gunakan domain email, bukan subdomain webmail (mail.devbit.biz.id adalah subdomain untuk akses frontend)
         $domain = Domain::create([
-            'name' => 'mail.devbit.biz.id',
+            'name' => 'devbit.biz.id',
             'active' => true,
         ]);
 
         // Mail user
         MailUser::create([
             'domain_id' => $domain->id,
-            'email' => 'testuser1@mail.devbit.biz.id',
+            'email' => 'testuser1@devbit.biz.id',
             'password' => '12345678', // This will be automatically hashed by the mutator
             'active' => true,
         ]);

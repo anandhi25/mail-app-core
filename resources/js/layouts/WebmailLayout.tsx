@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Outlet, NavLink, useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Outlet, NavLink } from 'react-router-dom';
 import {
   Inbox,
   Send,
@@ -12,18 +12,17 @@ import {
   User,
   Search,
   PenSquare,
-  Wifi,
-  WifiOff,
 } from 'lucide-react';
 import clsx from 'clsx';
 import ComposeModal from '../components/ComposeModal';
 import { useMailNotifications } from '../hooks/useMailNotifications';
+import { webmailProfileApi } from '../lib/api';
 
 const folders = [
   { name: 'INBOX', label: 'Inbox', icon: Inbox },
   { name: 'Drafts', label: 'Drafts', icon: File },
   { name: 'Sent', label: 'Sent', icon: Send },
-  { name: 'Junk', label: 'Spam', icon: AlertCircle },
+  { name: 'Spam', label: 'Spam', icon: AlertCircle },
   { name: 'Trash', label: 'Trash', icon: Trash2 },
   { name: 'Archive', label: 'Archive', icon: Archive },
 ];
@@ -31,16 +30,22 @@ const folders = [
 export default function WebmailLayout() {
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const [isComposeOpen, setComposeOpen] = useState(false);
-
   const { unreadCounts, isConnected } = useMailNotifications();
+  const [profile, setProfile] = useState<any>(null);
+
+  useEffect(() => {
+    webmailProfileApi.getProfile()
+      .then(setProfile)
+      .catch(console.error);
+  }, []);
 
   return (
     <div className="flex h-screen bg-white text-gray-800 font-sans overflow-hidden">
       {/* Sidebar */}
       <aside
         className={clsx(
-          "bg-[#1A1A1A] text-gray-300 w-64 flex-shrink-0 flex flex-col transition-all duration-300",
-          !isSidebarOpen && "-ml-64"
+          'bg-[#1A1A1A] text-gray-300 w-64 flex-shrink-0 flex flex-col transition-all duration-300',
+          !isSidebarOpen && '-ml-64'
         )}
       >
         <div className="h-16 flex items-center px-4 font-bold text-xl text-white tracking-wide gap-2">
@@ -67,12 +72,12 @@ export default function WebmailLayout() {
               <NavLink
                 key={f.name}
                 to={`/${f.name.toLowerCase()}`}
-                className={({ isActive }) => clsx(
-                  "flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-[#2D2D2D] text-white"
-                    : "hover:bg-[#252525] hover:text-white"
-                )}
+                className={({ isActive }) =>
+                  clsx(
+                    'flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                    isActive ? 'bg-[#2D2D2D] text-white' : 'hover:bg-[#252525] hover:text-white'
+                  )
+                }
               >
                 <div className="flex items-center gap-3">
                   <f.icon className="w-4 h-4" />
@@ -88,23 +93,26 @@ export default function WebmailLayout() {
           })}
         </nav>
 
+        {/* User info */}
         <div className="p-4 border-t border-[#2D2D2D] flex items-center justify-between">
           <div className="flex items-center gap-3 text-sm flex-1 min-w-0">
             <div className="w-8 h-8 bg-[#2D2D2D] rounded-full flex items-center justify-center shrink-0">
               <User className="w-4 h-4 text-gray-400" />
             </div>
-            <div className="truncate">
-              <div className="font-medium text-white truncate">Admin</div>
-              <div className="flex items-center gap-1 text-xs text-gray-500">
+            <div className="truncate flex-1">
+              <div className="font-medium text-white truncate" title={profile?.email || 'Loading...'}>
+                {profile?.name || profile?.email || 'Loading...'}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
                 {isConnected ? (
                   <>
-                    <Wifi className="w-3 h-3 text-green-500" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
                     <span className="text-green-500">Live</span>
                   </>
                 ) : (
                   <>
-                    <WifiOff className="w-3 h-3 text-gray-500" />
-                    <span>Reconnecting...</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block animate-pulse" />
+                    <span className="text-yellow-500">Connecting...</span>
                   </>
                 )}
               </div>
@@ -115,7 +123,7 @@ export default function WebmailLayout() {
               localStorage.removeItem('auth_token');
               window.location.href = '/login';
             }}
-            className="text-xs text-gray-400 hover:text-white px-2 py-1"
+            className="text-xs text-gray-400 hover:text-white px-2 py-1 shrink-0"
             title="Log out"
           >
             Logout
@@ -148,26 +156,24 @@ export default function WebmailLayout() {
           <div className="flex items-center gap-2">
             <NavLink
               to="/admin"
-              className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+              className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors hidden sm:block"
             >
               Admin Panel
             </NavLink>
-            <button className="p-2 hover:bg-gray-100 rounded-md text-gray-600">
+            <NavLink to="/settings" className={({isActive}) => clsx("p-2 rounded-md transition-colors", isActive ? "bg-blue-50 text-blue-600" : "hover:bg-gray-100 text-gray-600")}>
               <Settings className="w-5 h-5" />
-            </button>
+            </NavLink>
           </div>
         </header>
 
-        {/* Dynamic Content (Inbox/Reader Split) */}
+        {/* Dynamic Content */}
         <main className="flex-1 overflow-hidden relative">
           <Outlet />
         </main>
       </div>
 
       {/* Compose Modal */}
-      {isComposeOpen && (
-        <ComposeModal onClose={() => setComposeOpen(false)} />
-      )}
+      {isComposeOpen && <ComposeModal onClose={() => setComposeOpen(false)} />}
     </div>
   );
 }
