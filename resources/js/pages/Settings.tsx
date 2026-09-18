@@ -186,7 +186,7 @@ export default function Settings() {
                     <p className="text-xs text-gray-500">Not connected</p>
                   </div>
                 </div>
-                <button className="text-sm font-medium text-blue-600 hover:text-blue-700">Connect</button>
+                <button className="text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer">Connect</button>
               </div>
 
               {/* Dropbox */}
@@ -200,7 +200,7 @@ export default function Settings() {
                     <p className="text-xs text-gray-500">Not connected</p>
                   </div>
                 </div>
-                <button className="text-sm font-medium text-blue-600 hover:text-blue-700">Connect</button>
+                <button className="text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer">Connect</button>
               </div>
 
             </div>

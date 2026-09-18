@@ -54,6 +54,7 @@ Route::prefix('v1/webmail')->group(function () {
         Route::delete('/messages', [ImapController::class, 'bulkDelete']);
         Route::get('/messages/{uid}', [ImapController::class, 'getMessageDetail']);
         Route::delete('/messages/{uid}', [ImapController::class, 'deleteMessage']);
+        Route::patch('/messages/{uid}/read-status', [ImapController::class, 'markReadStatus']);
         Route::post('/messages/{uid}/move', [ImapController::class, 'moveMessage']);
 
         // SMTP / Drafts / Send

@@ -40,6 +40,8 @@ export const imapApi = {
     api.delete(`/webmail/messages/${uid}`, { params: { folder } }).then(res => res.data),
   bulkDelete: (folder: string, uids: number[]) =>
     api.delete('/webmail/messages', { data: { folder, uids } }).then(res => res.data),
+  markReadStatus: (folder: string, uid: number, isSeen: boolean) =>
+    api.patch(`/webmail/messages/${uid}/read-status`, { folder, is_seen: isSeen }).then(res => res.data),
 };
 
 export const webmailProfileApi = {

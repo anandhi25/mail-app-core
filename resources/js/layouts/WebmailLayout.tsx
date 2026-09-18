@@ -52,13 +52,13 @@ export default function WebmailLayout() {
           <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
             <Inbox className="w-5 h-5 text-white" />
           </div>
-          ProtonClone
-        </div>
+          ALSMail
+</div>
 
         <div className="px-4 py-4">
           <button
             onClick={() => setComposeOpen(true)}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
           >
             <PenSquare className="w-4 h-4" />
             New Message

@@ -106,7 +106,7 @@ export default function LoginAdmin() {
           </form>
           <div className="bg-gray-50 border-t border-gray-100 px-6 py-4">
             <p className="text-xs text-gray-500 text-center">
-              Protected by ProtonClone Security
+              Protected by ALSMail Security
             </p>
           </div>
         </div>

@@ -303,6 +303,40 @@ class ImapController extends Controller
     }
 
     /**
+     * Mark a message as read or unread.
+     */
+    public function markReadStatus(Request $request, $uid): JsonResponse
+    {
+        $request->validate([
+            'folder' => 'required|string',
+            'is_seen' => 'required|boolean',
+        ]);
+
+        $folderName = $request->input('folder');
+        $isSeen = $request->boolean('is_seen');
+
+        try {
+            $client = $this->getClient($request);
+            $folder = $this->resolveFolder($client, $folderName);
+            $message = $folder->query()->getMessageByUid($uid);
+
+            if (! $message) {
+                return response()->json(['error' => 'Message not found'], 404);
+            }
+
+            if ($isSeen) {
+                $message->setFlag('seen');
+            } else {
+                $message->unsetFlag('seen');
+            }
+
+            return response()->json(['message' => 'Status updated', 'is_seen' => $isSeen]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Move an email to another folder.
      */
     public function moveMessage(Request $request, $uid): JsonResponse

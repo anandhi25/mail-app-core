@@ -4,7 +4,7 @@ import { imapApi, smtpApi } from '../lib/api';
 import { Message, MessageAttachment } from '../types';
 import { format, isToday } from 'date-fns';
 import clsx from 'clsx';
-import { Download, Forward, MoreVertical, Paperclip, Reply, Send, Trash2, X } from 'lucide-react';
+import { Download, Forward, MailOpen, MailCheck, MoreVertical, Paperclip, Printer, Reply, Send, Trash2, X } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -67,6 +67,8 @@ export default function Inbox() {
   const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
 
   const inlineEditor = useEditor({
     extensions: [StarterKit, Link.configure({ openOnClick: false })],
@@ -253,6 +255,104 @@ export default function Inbox() {
     URL.revokeObjectURL(url);
   };
 
+  /** Close the three-dot menu when clicking outside of it. */
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handleMarkReadStatus = async (isSeen: boolean) => {
+    if (!activeMessage) return;
+    setShowMoreMenu(false);
+    try {
+      await imapApi.markReadStatus(resolvedFolder(), activeMessage.uid, isSeen);
+      setActiveMessage(prev => prev ? { ...prev, is_seen: isSeen } : prev);
+      setMessages(prev => prev.map(m => m.uid === activeMessage.uid ? { ...m, is_seen: isSeen } : m));
+    } catch (err) {
+      console.error('Failed to update read status', err);
+    }
+  };
+
+  const handlePrint = () => {
+    if (!activeMessage) return;
+    setShowMoreMenu(false);
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return;
+
+    const body = activeMessage.body_html
+      ? activeMessage.body_html
+      : `<pre style="white-space:pre-wrap;font-family:sans-serif">${activeMessage.body_text ?? ''}</pre>`;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>${activeMessage.subject}</title>
+          <style>
+            body { font-family: Arial, sans-serif; font-size: 14px; color: #1a1a1a; padding: 24px; max-width: 800px; margin: 0 auto; }
+            .header { border-bottom: 1px solid #e5e7eb; padding-bottom: 16px; margin-bottom: 24px; }
+            .header h1 { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
+            .meta { font-size: 13px; color: #6b7280; line-height: 1.8; }
+            .meta strong { color: #374151; }
+            img { max-width: 100%; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${activeMessage.subject}</h1>
+            <div class="meta">
+              <div><strong>From:</strong> ${activeMessage.from}</div>
+              <div><strong>To:</strong> ${activeMessage.to?.join(', ') ?? ''}</div>
+              <div><strong>Date:</strong> ${format(new Date(activeMessage.date), 'MMMM d, yyyy, h:mm a')}</div>
+            </div>
+          </div>
+          ${body}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const handleDownloadMessage = () => {
+    if (!activeMessage) return;
+    setShowMoreMenu(false);
+
+    const body = activeMessage.body_html
+      ? activeMessage.body_html
+      : (activeMessage.body_text ?? '');
+
+    // Build a minimal RFC-2822-like .eml file
+    const dateStr = format(new Date(activeMessage.date), "EEE, d MMM yyyy HH:mm:ss xx");
+    const eml = [
+      `Date: ${dateStr}`,
+      `From: ${activeMessage.from}`,
+      `To: ${activeMessage.to?.join(', ') ?? ''}`,
+      `Subject: ${activeMessage.subject}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: ${activeMessage.body_html ? 'text/html' : 'text/plain'}; charset=UTF-8`,
+      ``,
+      body,
+    ].join('\r\n');
+
+    const blob = new Blob([eml], { type: 'message/rfc822' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeMessage.subject.replace(/[^a-z0-9]/gi, '_').slice(0, 60)}.eml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const formatMessageDate = (d: string) => {
     const date = new Date(d);
     return isToday(date) ? format(date, 'HH:mm') : format(date, 'MMM d');
@@ -414,9 +514,52 @@ export default function Inbox() {
                     className="p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-md transition-colors" title="Delete">
                     <Trash2 className="w-5 h-5" />
                   </button>
-                  <button className="p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors">
-                    <MoreVertical className="w-5 h-5" />
-                  </button>
+                  {/* Three-dot dropdown menu */}
+                  <div className="relative" ref={moreMenuRef}>
+                    <button
+                      onClick={() => setShowMoreMenu(v => !v)}
+                      className={clsx('p-2 rounded-md transition-colors', showMoreMenu ? 'bg-gray-100 text-gray-900' : 'text-gray-500 hover:bg-gray-100')}
+                      title="More options"
+                    >
+                      <MoreVertical className="w-5 h-5" />
+                    </button>
+                    {showMoreMenu && (
+                      <div className="absolute right-0 top-full mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg z-50 py-1 overflow-hidden">
+                        {activeMessage.is_seen ? (
+                          <button
+                            onClick={() => handleMarkReadStatus(false)}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <MailOpen className="w-4 h-4 text-gray-400" />
+                            Mark as Unread
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleMarkReadStatus(true)}
+                            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <MailCheck className="w-4 h-4 text-gray-400" />
+                            Mark as Read
+                          </button>
+                        )}
+                        <div className="my-1 border-t border-gray-100" />
+                        <button
+                          onClick={handlePrint}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Printer className="w-4 h-4 text-gray-400" />
+                          Print
+                        </button>
+                        <button
+                          onClick={handleDownloadMessage}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Download className="w-4 h-4 text-gray-400" />
+                          Download (.eml)
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
