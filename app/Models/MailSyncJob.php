@@ -14,6 +14,7 @@ class MailSyncJob extends Model
         'source_encryption',
         'source_username',
         'source_password',
+        'local_password',
         'status',
         'total_messages',
         'synced_messages',

@@ -5,9 +5,11 @@ namespace App\Providers;
 use App\Auth\DovecotUserProvider;
 use App\Models\MailUser;
 use App\Models\ServerConfig;
+use App\Observers\MailUserObserver;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -29,6 +31,8 @@ class AppServiceProvider extends ServiceProvider
          * Register custom auth provider untuk MailUser yang passwordnya
          * disimpan dalam format SHA512-CRYPT ($6$...) agar kompatibel dengan Dovecot.
          */
+        URL::forceScheme('https');
+        MailUser::observe(MailUserObserver::class);
         Auth::provider('dovecot', function ($app, array $config) {
             return new DovecotUserProvider(
                 $app['hash'],

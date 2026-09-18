@@ -2,9 +2,9 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
 use App\Models\Domain;
 use App\Models\MailUser;
+use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -20,23 +20,21 @@ class DatabaseSeeder extends Seeder
         // Default API Administrator
         User::factory()->create([
             'name' => 'Admin Administrator',
-            'email' => 'admin@mail.devbit.biz.id',
+            'email' => 'admin@als.co.id',
             'password' => bcrypt('password123'), // Default password
         ]);
-    
-
 
         // Domain — gunakan domain email, bukan subdomain webmail (mail.devbit.biz.id adalah subdomain untuk akses frontend)
         $domain = Domain::create([
-            'name' => 'devbit.biz.id',
+            'name' => 'als.co.id',
             'active' => true,
         ]);
 
         // Mail user
         MailUser::create([
             'domain_id' => $domain->id,
-            'email' => 'testuser1@devbit.biz.id',
-            'password' => '12345678', // This will be automatically hashed by the mutator
+            'email' => 'it.alsholdings@als.co.id',
+            'password' => 'surabaya1234', // This will be automatically hashed by the mutator
             'active' => true,
         ]);
     }

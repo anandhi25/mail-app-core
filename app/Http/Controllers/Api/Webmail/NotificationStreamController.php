@@ -37,7 +37,7 @@ class NotificationStreamController extends Controller
                 'port' => config('imap.accounts.default.port'),
                 'encryption' => config('imap.accounts.default.encryption'),
                 'validate_cert' => config('imap.accounts.default.validate_cert'),
-                'username' => explode('@', $user->email)[0],
+                'username' => $user->email,
                 'password' => $password,
                 'protocol' => 'imap',
             ]);
@@ -72,7 +72,7 @@ class NotificationStreamController extends Controller
                     foreach ($foldersToWatch as $folderName) {
                         try {
                             $folder = $client->getFolder($folderName);
-                            $counts[$folderName] = $folder->messages()->unseen()->count();
+                            $counts[$folderName] = $folder->messages()->whereUnseen()->count();
                         } catch (\Exception) {
                             $counts[$folderName] = 0;
                         }

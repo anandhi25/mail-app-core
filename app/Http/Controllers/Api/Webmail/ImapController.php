@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Webklex\IMAP\Facades\Client;
+use Webklex\PHPIMAP\Folder;
 
 class ImapController extends Controller
 {
@@ -14,8 +15,9 @@ class ImapController extends Controller
      * In a real webmail app, you'd dynamically pass the user's email/password
      * instead of relying on the default .env account.
      */
-    private function getClient(Request $request)
+    private function getClient(Request $request): \Webklex\PHPIMAP\Client
     {
+
         $user = $request->user();
         $password = cache()->get("imap_pwd_{$user->id}");
         if (! $password) {
@@ -28,7 +30,7 @@ class ImapController extends Controller
             'port' => config('imap.accounts.default.port'),
             'encryption' => config('imap.accounts.default.encryption'),
             'validate_cert' => config('imap.accounts.default.validate_cert'),
-            'username' => explode('@', $user->email)[0],
+            'username' => $user->email,
             'password' => $password,
             'protocol' => 'imap',
         ]);
@@ -40,14 +42,54 @@ class ImapController extends Controller
 
     private function ensureStandardFolders(\Webklex\PHPIMAP\Client $client): void
     {
-        $existing = $client->getFolders(false)->map(fn ($f) => $f->full_name)->toArray();
-        $required = array_values(config('imap.options.common_folders', []));
+        try {
+            $existing = $client->getFolders(false)->map(fn ($f) => $f->full_name)->toArray();
+            $required = array_values(config('imap.options.common_folders', []));
 
-        foreach ($required as $folder) {
-            if ($folder !== 'INBOX' && ! in_array($folder, $existing, true)) {
-                $client->createFolder($folder);
+            foreach ($required as $folder) {
+                if ($folder !== 'INBOX' && ! in_array($folder, $existing, true)) {
+                    $client->createFolder($folder);
+                }
+            }
+        } catch (\Exception) {
+            // Non-fatal: continue even if folder creation fails on this server
+        }
+    }
+
+    /**
+     * Resolve a folder by name, with fallback to case-insensitive full_name match.
+     * Handles servers with different hierarchy delimiters (e.g. "INBOX.Sent" vs "Sent").
+     */
+    private function resolveFolder(\Webklex\PHPIMAP\Client $client, string $folderName): Folder
+    {
+        try {
+            $folder = $client->getFolder($folderName);
+            if ($folder) {
+                return $folder;
+            }
+        } catch (\Exception) {
+            // Fall through to scan-based resolution
+        }
+
+        // Scan all folders and match by name or full_name (case-insensitive)
+        $allFolders = $client->getFolders(false);
+        $needle = strtolower($folderName);
+
+        foreach ($allFolders as $candidate) {
+            if (strtolower($candidate->name) === $needle || strtolower($candidate->full_name) === $needle) {
+                return $candidate;
             }
         }
+
+        // Last resort: match by the last segment of the full_name
+        foreach ($allFolders as $candidate) {
+            $parts = explode($candidate->delimiter ?? '.', $candidate->full_name);
+            if (strtolower(end($parts)) === $needle) {
+                return $candidate;
+            }
+        }
+
+        throw new \Exception("Folder \"{$folderName}\" not found on this server.");
     }
 
     /**
@@ -61,11 +103,19 @@ class ImapController extends Controller
 
             $result = [];
             foreach ($folders as $folder) {
+                try {
+                    $messagesCount = $folder->messages()->whereAll()->count();
+                    $unreadCount = $folder->messages()->whereUnseen()->count();
+                } catch (\Exception) {
+                    $messagesCount = 0;
+                    $unreadCount = 0;
+                }
+
                 $result[] = [
                     'name' => $folder->name,
                     'full_name' => $folder->full_name,
-                    'messages_count' => $folder->messages()->count(),
-                    'unread_count' => $folder->messages()->unseen()->count(),
+                    'messages_count' => $messagesCount,
+                    'unread_count' => $unreadCount,
                 ];
             }
 
@@ -92,12 +142,23 @@ class ImapController extends Controller
 
         try {
             $client = $this->getClient($request);
-            $folder = $client->getFolder($folderName);
+            $folder = $this->resolveFolder($client, $folderName);
 
-            // Paginate messages (latest first)
-            // SET fetch_body false to drastically speed up inbox listing!
+            // Check if folder is empty first
+            $total = $folder->messages()->whereAll()->count();
+            if ($total === 0) {
+                return response()->json([
+                    'folder' => $folderName,
+                    'page' => $page,
+                    'total' => 0,
+                    'messages' => [],
+                ]);
+            }
+
             $messages = $folder->query()
+                ->whereAll()
                 ->setFetchBody(false)
+                ->setFetchOrderDesc()
                 ->limit($perPage, $page)
                 ->get();
 
@@ -116,6 +177,7 @@ class ImapController extends Controller
             return response()->json([
                 'folder' => $folderName,
                 'page' => $page,
+                'total' => $total,
                 'messages' => $result,
             ]);
         } catch (\Exception $e) {
@@ -133,12 +195,11 @@ class ImapController extends Controller
 
         try {
             $client = $this->getClient($request);
-            $folder = $client->getFolder($folderName);
+            $folder = $this->resolveFolder($client, $folderName);
 
             // Set options properly to parse body completely but efficiently
             $message = $folder->query()
                 ->setFetchBody(true)
-                ->setFetchAttachment(true)
                 ->getMessageByUid($uid);
 
             if (! $message) {
@@ -183,7 +244,7 @@ class ImapController extends Controller
 
         try {
             $client = $this->getClient($request);
-            $folder = $client->getFolder($folderName);
+            $folder = $this->resolveFolder($client, $folderName);
             $message = $folder->query()->getMessageByUid($uid);
 
             if (! $message) {
@@ -219,7 +280,7 @@ class ImapController extends Controller
 
         try {
             $client = $this->getClient($request);
-            $folder = $client->getFolder($folderName);
+            $folder = $this->resolveFolder($client, $folderName);
 
             $deleted = 0;
             $isPermanent = strtolower($folderName) === 'trash';
@@ -256,7 +317,7 @@ class ImapController extends Controller
 
         try {
             $client = $this->getClient($request);
-            $folder = $client->getFolder($folderName);
+            $folder = $this->resolveFolder($client, $folderName);
             $message = $folder->query()->getMessageByUid($uid);
 
             if (! $message) {

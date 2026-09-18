@@ -67,7 +67,7 @@ class ProcessMailSync implements ShouldQueue
                 }
 
                 if (in_array($folder->name, $foldersToSync) || in_array($destName, $foldersToSync)) {
-                    $count = $folder->messages()->count();
+                    $count = $folder->messages()->whereAll()->count();
                     $totalMessages += $count;
                     $foldersMap[$folder->name] = $destName;
                 }
@@ -90,8 +90,8 @@ class ProcessMailSync implements ShouldQueue
 
                 $destFolder = $destClient->getFolder($destName);
 
-                // Fetch ALL messages from source without body stream just to get IDs quickly
-                $messages = $srcFolder->query()->setFetchBody(true)->setFetchAttachment(true)->get();
+                // Fetch ALL messages from source with full body and attachments for migration
+                $messages = $srcFolder->query()->whereAll()->setFetchBody(true)->get();
 
                 foreach ($messages as $message) {
                     // Extract Raw RFC822 string (contains everything: headers, body, attachments)
