@@ -3,17 +3,17 @@
 namespace App\Http\Controllers\Api\Webmail;
 
 use App\Http\Controllers\Controller;
+use App\Models\MailIndex;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
-use Webklex\IMAP\Facades\Client;
 
 class NotificationStreamController extends Controller
 {
     /**
      * Stream realtime mail notifications via Server-Sent Events.
      *
-     * Opens one persistent IMAP connection per user session, polls every 30 s,
-     * and pushes unread counts only when they change — just like Zimbra/Roundcube.
+     * Polls the local MailIndex database every 30s and pushes unread counts
+     * only when they change — lightweight, no IMAP connection required.
      */
     public function __invoke(Request $request): StreamedResponse
     {
@@ -21,34 +21,6 @@ class NotificationStreamController extends Controller
             $this->configureStream();
 
             $user = $request->user();
-            $password = cache()->get("imap_pwd_{$user->id}");
-
-            if (! $password) {
-                $this->sendEvent('error', ['message' => 'IMAP session expired. Please log in again.']);
-
-                return;
-            }
-
-            $password = decrypt($password);
-
-            // Open one persistent IMAP connection for the lifetime of this SSE stream
-            $client = Client::make([
-                'host' => config('imap.accounts.default.host'),
-                'port' => config('imap.accounts.default.port'),
-                'encryption' => config('imap.accounts.default.encryption'),
-                'validate_cert' => config('imap.accounts.default.validate_cert'),
-                'username' => $user->email,
-                'password' => $password,
-                'protocol' => 'imap',
-            ]);
-
-            try {
-                $client->connect();
-            } catch (\Exception $e) {
-                $this->sendEvent('error', ['message' => 'IMAP connection failed.']);
-
-                return;
-            }
 
             // Confirm connection to the frontend
             $this->sendEvent('connected', ['user' => $user->email]);
@@ -63,19 +35,13 @@ class NotificationStreamController extends Controller
                 }
 
                 try {
-                    // Re-use existing connection; reconnect if dropped
-                    if (! $client->isConnected()) {
-                        $client->connect();
-                    }
-
+                    // Query unread counts directly from our indexed database — no IMAP needed
                     $counts = [];
                     foreach ($foldersToWatch as $folderName) {
-                        try {
-                            $folder = $client->getFolder($folderName);
-                            $counts[$folderName] = $folder->messages()->whereUnseen()->count();
-                        } catch (\Exception) {
-                            $counts[$folderName] = 0;
-                        }
+                        $counts[$folderName] = MailIndex::where('mail_user_id', $user->id)
+                            ->where('folder', $folderName)
+                            ->where('is_seen', false)
+                            ->count();
                     }
 
                     // Push event only when counts change (no noise)
@@ -84,15 +50,13 @@ class NotificationStreamController extends Controller
                         $lastCounts = $counts;
                     }
                 } catch (\Exception) {
-                    // Transient IMAP error — skip this cycle, try next
+                    // Transient DB error — skip this cycle, try next
                 }
 
                 $this->sendHeartbeat();
 
                 sleep($pollIntervalSeconds);
             }
-
-            $client->disconnect();
         }, 200, $this->streamHeaders());
     }
 

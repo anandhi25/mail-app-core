@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webmail;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\MaildirIndexJob;
 use App\Models\MailIndex;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -146,12 +147,10 @@ class ImapController extends Controller
         $user = $request->user();
 
         try {
-            // If user has never been indexed, trigger mass-index in background and return empty with flag
+            // If user has never been indexed, trigger mass-index via queue job
             $hasAnyIndex = MailIndex::where('mail_user_id', $user->id)->exists();
             if (! $hasAnyIndex) {
-                // Dispatch artisan command as background process so it doesn't block the request
-                $userEmail = escapeshellarg($user->email);
-                exec("php /var/www/mailapp/artisan mail:mass-index {$userEmail} --folder=INBOX > /dev/null 2>&1 &");
+                MaildirIndexJob::dispatch($user->id, 'INBOX', true);
 
                 return response()->json([
                     'folder' => $folderName,
