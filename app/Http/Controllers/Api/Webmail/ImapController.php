@@ -150,7 +150,7 @@ class ImapController extends Controller
             // If user has never been indexed, trigger mass-index via queue job
             $hasAnyIndex = MailIndex::where('mail_user_id', $user->id)->exists();
             if (! $hasAnyIndex) {
-                MaildirIndexJob::dispatch($user->id, 'INBOX', true);
+                MaildirIndexJob::dispatch($user->id, '*', true);
 
                 return response()->json([
                     'folder' => $folderName,

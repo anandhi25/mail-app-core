@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 
 class MassIndexCommand extends Command
 {
-    protected $signature = 'mail:mass-index {email?} {--folder=INBOX} {--force}';
+    protected $signature = 'mail:mass-index {email?} {--folder=*} {--force}';
     protected $description = 'Mass index emails directly from disk (Maildir)';
 
     public function handle(MaildirScannerService $scanner)

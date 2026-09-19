@@ -31,6 +31,26 @@ class MaildirScannerService
     {
         $systemPath = rtrim($systemPath, '/');
 
+        // Jika folderName = '*', kita scan semua folder!
+        if ($folderName === '*') {
+            $total = $this->scanFolder($user, $systemPath, 'INBOX', $force);
+
+            $subdirs = scandir($systemPath);
+            foreach ($subdirs as $dir) {
+                if ($dir === '.' || $dir === '..') continue;
+
+                // Cari folder Dovecot yang berawalan titik
+                if (is_dir($systemPath . '/' . $dir) && str_starts_with($dir, '.')) {
+                    $realFolderName = ltrim($dir, '.');
+                    // Abaikan folder aneh atau system
+                    if ($realFolderName === '' || $realFolderName === 'lock') continue;
+
+                    $total += $this->scanFolder($user, $systemPath, $realFolderName, $force);
+                }
+            }
+            return $total;
+        }
+
         // Resolve Maildir paths (INBOX is at root level, others have dot prefixes)
         if (strtoupper($folderName) === 'INBOX') {
             $maildirPath = $systemPath;

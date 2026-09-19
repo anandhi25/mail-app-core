@@ -19,7 +19,7 @@ class MaildirIndexJob implements ShouldQueue
 
     public function __construct(
         public readonly int $mailUserId,
-        public readonly string $folderName = 'INBOX',
+        public readonly string $folderName = '*',
         public readonly bool $force = false,
     ) {}
 
