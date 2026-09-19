@@ -23,10 +23,10 @@ class WebmailAuthController extends Controller
             $token = $user->createToken('webmail-token')->plainTextToken;
 
             // Simpan password user ke cache sementara untuk koneksi IMAP/SMTP nantinya.
-            // PERINGATAN: Di lingkungan nyata, menyimpan password plaintext seperti ini rentan.
-            // Namun, IMAP client butuh kredensial asli untuk connect.
-            // Alternatif lebih aman: enkripsi menggunakan APP_KEY Laravel di DB atau Cache
             cache()->put("imap_pwd_{$user->id}", encrypt($request->password), now()->addDays(7));
+
+            // Trigger background sync for search index automatically
+            \App\Jobs\SyncMailboxJob::dispatch($user->id, 'INBOX', 100);
 
             return response()->json([
                 'message' => 'Login successful',

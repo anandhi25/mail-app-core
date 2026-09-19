@@ -44,6 +44,41 @@ export const imapApi = {
     api.patch(`/webmail/messages/${uid}/read-status`, { folder, is_seen: isSeen }).then(res => res.data),
 };
 
+export interface SearchResult {
+  id: number;
+  uid: string;
+  folder: string;
+  subject: string;
+  from_address: string;
+  from_name: string;
+  is_seen: boolean;
+  has_attachment: boolean;
+  sent_at: string | null;
+  snippet: string;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+  total: number;
+  indexing: boolean;
+  error?: string;
+  message?: string;
+}
+
+export const searchApi = {
+  search: (params: {
+    q: string;
+    folder?: string;
+    is_seen?: boolean;
+    has_attachment?: boolean;
+    limit?: number;
+  }): Promise<SearchResponse> =>
+    api.get('/webmail/search', { params }).then(res => res.data),
+
+  triggerSync: (folder = 'INBOX') =>
+    api.post('/webmail/search/sync', { folder }).then(res => res.data),
+};
+
 export const webmailProfileApi = {
   getProfile: () => api.get("/webmail/profile").then(res => res.data),
   updateProfile: (data: any) => api.put("/webmail/profile", data).then(res => res.data),

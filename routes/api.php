@@ -6,7 +6,9 @@ use App\Http\Controllers\Api\DomainController;
 use App\Http\Controllers\Api\MailUserController;
 use App\Http\Controllers\Api\ServerConfigController;
 use App\Http\Controllers\Api\Webmail\ImapController;
+use App\Http\Controllers\Api\Webmail\InternalIndexingController;
 use App\Http\Controllers\Api\Webmail\NotificationStreamController;
+use App\Http\Controllers\Api\Webmail\SearchController;
 use App\Http\Controllers\Api\Webmail\SmtpController;
 use App\Http\Controllers\Api\Webmail\WebmailAuthController;
 use App\Http\Controllers\Api\Webmail\WebmailProfileController;
@@ -57,6 +59,10 @@ Route::prefix('v1/webmail')->group(function () {
         Route::patch('/messages/{uid}/read-status', [ImapController::class, 'markReadStatus']);
         Route::post('/messages/{uid}/move', [ImapController::class, 'moveMessage']);
 
+        // Search (Meilisearch)
+        Route::get('/search', [SearchController::class, 'search']);
+        Route::post('/search/sync', [SearchController::class, 'triggerSync']);
+
         // SMTP / Drafts / Send
         Route::get('/drafts', [SmtpController::class, 'getDrafts']);
         Route::post('/drafts', [SmtpController::class, 'saveDraft']);
@@ -69,4 +75,9 @@ Route::prefix('v1/webmail')->group(function () {
     // lalu diinjeksi ke Bearer oleh AuthenticateSseToken sebelum AuthenticateMailUser.
     Route::get('/notifications/stream', NotificationStreamController::class)
         ->middleware([AuthenticateSseToken::class, AuthenticateMailUser::class]);
+});
+
+// --- Internal API (For Webhooks/Mail Server integration only) ---
+Route::prefix('v1/internal')->group(function () {
+    Route::post('/index-new-file', [InternalIndexingController::class, 'indexNewFile']);
 });

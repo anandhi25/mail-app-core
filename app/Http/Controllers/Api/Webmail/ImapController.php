@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Webmail;
 
 use App\Http\Controllers\Controller;
+use App\Models\MailIndex;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Webklex\IMAP\Facades\Client;
@@ -97,19 +98,22 @@ class ImapController extends Controller
      */
     public function getFolders(Request $request): JsonResponse
     {
+        $user = $request->user();
         try {
             $client = $this->getClient($request);
             $folders = $client->getFolders();
 
             $result = [];
             foreach ($folders as $folder) {
-                try {
-                    $messagesCount = $folder->messages()->whereAll()->count();
-                    $unreadCount = $folder->messages()->whereUnseen()->count();
-                } catch (\Exception) {
-                    $messagesCount = 0;
-                    $unreadCount = 0;
-                }
+                // Fetch counts directly from our indexed database for blazing fast performance
+                $messagesCount = MailIndex::where('mail_user_id', $user->id)
+                    ->where('folder', $folder->name)
+                    ->count();
+
+                $unreadCount = MailIndex::where('mail_user_id', $user->id)
+                    ->where('folder', $folder->name)
+                    ->where('is_seen', false)
+                    ->count();
 
                 $result[] = [
                     'name' => $folder->name,
@@ -139,38 +143,30 @@ class ImapController extends Controller
         $folderName = $request->input('folder', 'INBOX');
         $page = $request->input('page', 1);
         $perPage = $request->input('per_page', 15);
+        $user = $request->user();
 
         try {
-            $client = $this->getClient($request);
-            $folder = $this->resolveFolder($client, $folderName);
+            // Retrieve from database instead of IMAP for instant loading
+            $query = MailIndex::where('mail_user_id', $user->id)
+                ->where('folder', $folderName)
+                ->orderBy('sent_at', 'desc')
+                ->orderBy('id', 'desc');
 
-            // Check if folder is empty first
-            $total = $folder->messages()->whereAll()->count();
-            if ($total === 0) {
-                return response()->json([
-                    'folder' => $folderName,
-                    'page' => $page,
-                    'total' => 0,
-                    'messages' => [],
-                ]);
-            }
+            $total = $query->count();
 
-            $messages = $folder->query()
-                ->whereAll()
-                ->setFetchBody(false)
-                ->setFetchOrderDesc()
-                ->limit($perPage, $page)
+            $messages = $query->offset(($page - 1) * $perPage)
+                ->limit($perPage)
                 ->get();
 
             $result = [];
             foreach ($messages as $message) {
                 $result[] = [
-                    'uid' => $message->getUid(),
-                    'subject' => $message->getSubject()[0] ?? '(No Subject)',
-                    'from' => $message->getFrom()[0]->mail ?? '',
-                    'date' => $message->getDate()[0]->format('Y-m-d H:i:s'),
-                    'is_seen' => $message->hasFlag('seen'),
-                    'has_attachments' => $message->hasAttachments(),
+                    'uid' => $message->uid,
+                    'subject' => $message->subject,
+                    'from' => $message->from_address,
+                    'date' => $message->sent_at,
+                    'is_seen' => (bool) $message->is_seen,
+                    'has_attachments' => (bool) $message->has_attachment,
                 ];
             }
 
@@ -206,8 +202,12 @@ class ImapController extends Controller
                 return response()->json(['error' => 'Message not found'], 404);
             }
 
-            // Mark as read
+            // Mark as read on IMAP server and sync to local database
             $message->setFlag('seen');
+            MailIndex::where('mail_user_id', $request->user()->id)
+                ->where('folder', $folderName)
+                ->where('uid', $uid)
+                ->update(['is_seen' => true]);
 
             $attachments = [];
             foreach ($message->getAttachments() as $attachment) {
@@ -329,6 +329,12 @@ class ImapController extends Controller
             } else {
                 $message->unsetFlag('seen');
             }
+
+            // Sync status to local database so inbox list reflects the change immediately
+            MailIndex::where('mail_user_id', $request->user()->id)
+                ->where('folder', $folderName)
+                ->where('uid', $uid)
+                ->update(['is_seen' => $isSeen]);
 
             return response()->json(['message' => 'Status updated', 'is_seen' => $isSeen]);
         } catch (\Exception $e) {

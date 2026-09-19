@@ -9,7 +9,7 @@ import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table
 import { Subscript } from '@tiptap/extension-subscript';
 import { Superscript } from '@tiptap/extension-superscript';
 import {
-  X, Minimize2, Maximize2, Send, Paperclip, Trash2, Cloud, HardDrive,
+  X, Minimize2, Maximize2, Minimize, Send, Paperclip, Trash2, Cloud, HardDrive,
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, Link2, Image as ImageIcon,
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, Quote, Code, Minus, Table as TableIcon,
@@ -87,6 +87,7 @@ export default function ComposeModal({
   initialBody,
 }: ComposeModalProps) {
   const [isMinimized, setIsMinimized] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
@@ -397,9 +398,17 @@ export default function ComposeModal({
           onClick={() => setIsMinimized(false)}
         >
           <span className="font-medium text-sm truncate">New Message</span>
-          <div className="flex gap-2">
-            <button className="hover:bg-gray-700 p-1 rounded">
-              <Maximize2 className="w-4 h-4" />
+          <div className="flex gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMinimized(false);
+                setIsMaximized(true);
+              }}
+              className="hover:bg-gray-700 p-1 rounded"
+              title="Maximize"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={(e) => {
@@ -407,8 +416,9 @@ export default function ComposeModal({
                 handleClose();
               }}
               className="hover:bg-gray-700 p-1 rounded"
+              title="Close"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -417,7 +427,14 @@ export default function ComposeModal({
   }
 
   return (
-    <div className="fixed bottom-0 right-24 w-[780px] bg-white rounded-t-xl shadow-[0_0_40px_rgba(0,0,0,0.18)] border border-gray-200 z-50 flex flex-col max-h-[85vh]">
+    <div
+      className={clsx(
+        'bg-white shadow-[0_0_40px_rgba(0,0,0,0.18)] border border-gray-200 z-50 flex flex-col',
+        isMaximized
+          ? 'fixed inset-4 rounded-xl'
+          : 'fixed bottom-0 right-24 w-[780px] rounded-t-xl max-h-[85vh]',
+      )}
+    >
       {/* Header */}
       <div className="bg-gray-900 text-white px-4 py-2.5 rounded-t-xl flex justify-between items-center shrink-0">
         <span className="font-medium text-sm">New Message</span>
@@ -425,14 +442,27 @@ export default function ComposeModal({
           <button
             onClick={() => setIsMinimized(true)}
             className="hover:text-white hover:bg-gray-700 p-1 rounded transition-colors"
+            title="Minimize"
           >
-            <Minimize2 className="w-4 h-4" />
+            <Minimize2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setIsMaximized((v) => !v)}
+            className="hover:text-white hover:bg-gray-700 p-1 rounded transition-colors"
+            title={isMaximized ? 'Restore' : 'Maximize'}
+          >
+            {isMaximized ? (
+              <Minimize className="w-3.5 h-3.5" />
+            ) : (
+              <Maximize2 className="w-3.5 h-3.5" />
+            )}
           </button>
           <button
             onClick={handleClose}
             className="hover:text-white hover:bg-gray-700 p-1 rounded transition-colors"
+            title="Close"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

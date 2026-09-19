@@ -10,11 +10,11 @@ import {
   Menu,
   Settings,
   User,
-  Search,
   PenSquare,
 } from 'lucide-react';
 import clsx from 'clsx';
 import ComposeModal from '../components/ComposeModal';
+import SearchBar from '../components/SearchBar';
 import { useMailNotifications } from '../hooks/useMailNotifications';
 import { webmailProfileApi } from '../lib/api';
 
@@ -143,14 +143,7 @@ export default function WebmailLayout() {
               <Menu className="w-5 h-5" />
             </button>
 
-            <div className="max-w-xl w-full relative">
-              <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search messages..."
-                className="w-full bg-gray-100 border-transparent focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 rounded-lg pl-10 pr-4 py-2 text-sm transition-all outline-none"
-              />
-            </div>
+            <SearchBar />
           </div>
 
           <div className="flex items-center gap-2">

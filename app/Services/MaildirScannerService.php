@@ -25,6 +25,8 @@ class MaildirScannerService
      * @param string $folderName e.g., INBOX, Sent
      * @param bool $force Re-index if exists
      */
+    public bool $debugMode = false;
+
     public function scanFolder(MailUser $user, string $systemPath, string $folderName, bool $force = false): int
     {
         $systemPath = rtrim($systemPath, '/');
@@ -77,7 +79,6 @@ class MaildirScannerService
                 $uid = $uidMapping[$baseFilename] ?? null;
 
                 if (!$uid) {
-                    Log::debug("Skipped (UID not found in mapping): {$file} -> base: {$baseFilename}");
                     continue; // Skip if we can't map it to an IMAP UID
                 }
 
@@ -106,6 +107,7 @@ class MaildirScannerService
                         Log::info("Indexed {$indexedCount} files in {$folderName}");
                     }
                 } catch (\Throwable $e) {
+                    echo "ERROR on UID $uid: " . $e->getMessage() . "\n";
                     Log::error("Failed to index {$filePath}: " . $e->getMessage());
                 }
             }
@@ -177,8 +179,7 @@ class MaildirScannerService
     {
         // Read file using stream to save memory on large files
         $handle = fopen($filePath, 'r');
-        $message = $this->parser->parse($handle);
-        fclose($handle);
+        $message = $this->parser->parse($handle, false);
 
         $isSeen = str_contains($filename, ':2,') && str_contains(explode(':2,', $filename)[1] ?? '', 'S');
         $hasAttachment = $message->getAttachmentCount() > 0;
@@ -196,16 +197,23 @@ class MaildirScannerService
 
         $toAddresses = [];
         $toHeader = $message->getHeader('To');
-        if ($toHeader && method_exists($toHeader, 'getAddresses')) {
-            $toAddresses = array_map(fn($a) => $a->getEmail(), $toHeader->getAddresses());
+        if ($toHeader && method_exists($toHeader, 'getParts')) {
+            foreach ($toHeader->getParts() as $part) {
+                if (method_exists($part, 'getEmail') && $part->getEmail()) {
+                    $toAddresses[] = $part->getEmail();
+                }
+            }
         }
 
         $fromAddress = '';
         $fromName = '';
         $fromHeader = $message->getHeader('From');
-        if ($fromHeader && method_exists($fromHeader, 'getAddresses') && !empty($fromHeader->getAddresses())) {
-            $fromAddress = $fromHeader->getAddresses()[0]->getEmail();
-            $fromName = $fromHeader->getAddresses()[0]->getName() ?? '';
+        if ($fromHeader && method_exists($fromHeader, 'getParts')) {
+            $parts = $fromHeader->getParts();
+            if (count($parts) > 0 && method_exists($parts[0], 'getEmail')) {
+                $fromAddress = $parts[0]->getEmail();
+                $fromName = $parts[0]->getName() ?? '';
+            }
         }
 
         $dateHeader = $message->getHeaderValue('Date');
@@ -231,5 +239,8 @@ class MaildirScannerService
         );
 
         $record->searchable();
+
+        // Close the stream ONLY after we are completely done reading from the lazy-loaded message
+        fclose($handle);
     }
 }
