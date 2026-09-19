@@ -69,6 +69,7 @@ export default function Inbox() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const [isIndexing, setIsIndexing] = useState(false);
 
   const inlineEditor = useEditor({
     extensions: [StarterKit, Link.configure({ openOnClick: false })],
@@ -106,15 +107,28 @@ export default function Inbox() {
     setLoading(true);
     try {
       const res = await imapApi.getMessages(resolvedFolder(), pageToLoad);
-      setMessages(res.messages);
-      setHasMore(res.messages.length === 15);
-      setPage(pageToLoad);
+      if (res.indexing) {
+        setIsIndexing(true);
+        setMessages([]);
+      } else {
+        setIsIndexing(false);
+        setMessages(res.messages);
+        setHasMore(res.messages.length === 15);
+        setPage(pageToLoad);
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
+
+  // Auto-refresh every 5 seconds while mailbox is being indexed
+  useEffect(() => {
+    if (!isIndexing) return;
+    const timer = setTimeout(() => loadMessages(1), 5000);
+    return () => clearTimeout(timer);
+  }, [isIndexing]);
 
   const handleNextPage = () => { if (hasMore) loadMessages(page + 1); };
   const handlePrevPage = () => { if (page > 1) loadMessages(page - 1); };
@@ -415,6 +429,14 @@ export default function Inbox() {
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="p-8 text-center text-gray-400">Loading messages...</div>
+          ) : isIndexing ? (
+            <div className="p-8 text-center">
+              <div className="inline-flex flex-col items-center gap-3">
+                <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin" />
+                <p className="text-sm font-medium text-gray-700">Mailbox sedang diproses...</p>
+                <p className="text-xs text-gray-400">Email Anda sedang diindeks. Halaman akan otomatis refresh.</p>
+              </div>
+            </div>
           ) : messages.length === 0 ? (
             <div className="p-8 text-center text-gray-400">No messages in this folder.</div>
           ) : (
