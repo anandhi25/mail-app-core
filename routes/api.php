@@ -63,6 +63,9 @@ Route::prefix('v1/webmail')->group(function () {
         Route::get('/search', [SearchController::class, 'search']);
         Route::post('/search/sync', [SearchController::class, 'triggerSync']);
 
+        // AI Assistant
+        Route::post('/ai/assist', [\App\Http\Controllers\Api\Webmail\AiAssistantController::class, 'generate']);
+
         // SMTP / Drafts / Send
         Route::get('/drafts', [SmtpController::class, 'getDrafts']);
         Route::post('/drafts', [SmtpController::class, 'saveDraft']);

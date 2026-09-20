@@ -147,13 +147,7 @@ export default function WebmailLayout() {
           </div>
 
           <div className="flex items-center gap-2">
-            <NavLink
-              to="/admin"
-              className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md transition-colors hidden sm:block"
-            >
-              Admin Panel
-            </NavLink>
-            <NavLink to="/settings" className={({isActive}) => clsx("p-2 rounded-md transition-colors", isActive ? "bg-blue-50 text-blue-600" : "hover:bg-gray-100 text-gray-600")}>
+            <NavLink to="/settings" className={({isActive}) => clsx("p-2 rounded-md transition-colors", isActive ? "bg-blue-50 text-blue-600" : "hover:bg-gray-100 text-gray-600")} title="Settings">
               <Settings className="w-5 h-5" />
             </NavLink>
           </div>

@@ -14,10 +14,10 @@ import {
   AlignLeft, AlignCenter, AlignRight, AlignJustify,
   List, ListOrdered, Quote, Code, Minus, Table as TableIcon,
   Subscript as SubscriptIcon, Superscript as SuperscriptIcon, Highlighter,
-  Undo, Redo, ChevronDown, Type,
+  Undo, Redo, ChevronDown, Type, Wand2, Loader2, Sparkles
 } from 'lucide-react';
 import clsx from 'clsx';
-import { smtpApi } from '../lib/api';
+import { smtpApi, aiApi } from '../lib/api';
 
 interface ComposeModalProps {
   onClose: () => void;
@@ -92,6 +92,11 @@ export default function ComposeModal({
   const [isMaximized, setIsMaximized] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+
+  // AI Assist State
+  const [showAiMenu, setShowAiMenu] = useState(false);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showLinkPopover, setShowLinkPopover] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
@@ -215,6 +220,32 @@ export default function ComposeModal({
       alert('Failed to send email');
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleAiAction = async (action: string) => {
+    setShowAiMenu(false);
+    if (!editor) return;
+
+    const currentText = editor.getHTML();
+    if (!currentText || currentText === '<p></p>') {
+        alert('Please write some rough notes or text first before using AI.');
+        return;
+    }
+
+    setIsAiLoading(true);
+    try {
+        // Send to our Laravel AI endpoint
+        const response = await aiApi.assist(currentText, action, '');
+        if (response.result) {
+            // Replace the editor content with the AI generated one
+            editor.commands.setContent(response.result);
+        }
+    } catch (err: any) {
+        console.error("AI Error:", err);
+        alert(err.response?.data?.error || 'AI generation failed.');
+    } finally {
+        setIsAiLoading(false);
     }
   };
 
@@ -545,6 +576,70 @@ export default function ComposeModal({
         className="bg-gray-50 border-b border-gray-200 px-2 py-1.5 shrink-0 flex flex-wrap gap-0.5 items-center select-none"
         onMouseDown={(e) => e.preventDefault()}
       >
+        {/* AI Assist */}
+        <div className="relative">
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setShowAiMenu(!showAiMenu);
+            }}
+            className={clsx(
+              "flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors mr-1 border",
+              showAiMenu ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-gradient-to-r from-purple-50 to-fuchsia-50 text-purple-700 hover:from-purple-100 hover:to-fuchsia-100 border-purple-100"
+            )}
+            title="AI Writing Assistant"
+          >
+            {isAiLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Wand2 className="w-3.5 h-3.5" />
+            )}
+            AI Assist
+            <ChevronDown className="w-3 h-3 ml-0.5" />
+          </button>
+
+          {showAiMenu && (
+            <div className="absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 shadow-xl rounded-lg py-1 z-50 text-sm overflow-hidden">
+              <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
+                Rewrite current text
+              </div>
+              <button
+                className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700 flex items-center gap-2 transition-colors"
+                onMouseDown={(e) => { e.preventDefault(); handleAiAction('professional'); }}
+              >
+                👔 Make it Professional
+              </button>
+              <button
+                className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700 flex items-center gap-2 transition-colors"
+                onMouseDown={(e) => { e.preventDefault(); handleAiAction('friendly'); }}
+              >
+                😊 Make it Friendly
+              </button>
+              <button
+                className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700 flex items-center gap-2 transition-colors"
+                onMouseDown={(e) => { e.preventDefault(); handleAiAction('shorter'); }}
+              >
+                ✂️ Make it Shorter
+              </button>
+              <button
+                className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700 flex items-center gap-2 transition-colors"
+                onMouseDown={(e) => { e.preventDefault(); handleAiAction('longer'); }}
+              >
+                📝 Make it Longer
+              </button>
+              <button
+                className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700 flex items-center gap-2 transition-colors border-t border-gray-100 mt-1 pt-2"
+                onMouseDown={(e) => { e.preventDefault(); handleAiAction('grammar'); }}
+              >
+                ✨ Fix Spelling & Grammar
+              </button>
+            </div>
+          )}
+        </div>
+
+        <Divider />
+
         {/* Undo / Redo */}
         <ToolbarButton onClick={() => editor?.chain().focus().undo().run()} title="Undo (Ctrl+Z)">
           <Undo className="w-3.5 h-3.5" />

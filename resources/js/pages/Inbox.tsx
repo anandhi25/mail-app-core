@@ -8,6 +8,7 @@ import { Download, Forward, MailOpen, MailCheck, MoreVertical, Paperclip, Printe
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
+import ComposeModal from '../components/ComposeModal';
 
 type InlineMode = 'reply' | 'forward' | null;
 
@@ -62,17 +63,18 @@ export default function Inbox() {
   const [loadingMessage, setLoadingMessage] = useState(false);
   const [inlineMode, setInlineMode] = useState<InlineMode>(null);
   const [inlineTo, setInlineTo] = useState('');
+
+  // AI Assist State for inline
+  const [showAiMenu, setShowAiMenu] = useState(false);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  // For standalone compose
+  const [showCompose, setShowCompose] = useState(false);
+  const [composeInitialTo, setComposeInitialTo] = useState('');
+  const [composeInitialSubject, setComposeInitialSubject] = useState('');
+  const [composeInitialBody, setComposeInitialBody] = useState('');
   const [isSending, setIsSending] = useState(false);
   const inlineRef = useRef<HTMLDivElement>(null);
-  const [confirmDeleteUid, setConfirmDeleteUid] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-  const [isIndexing, setIsIndexing] = useState(false);
 
   const inlineEditor = useEditor({
     extensions: [StarterKit, Link.configure({ openOnClick: false })],
@@ -83,6 +85,16 @@ export default function Inbox() {
       },
     },
   });
+
+  const [confirmDeleteUid, setConfirmDeleteUid] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [selectedUids, setSelectedUids] = useState<Set<number>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const [isIndexing, setIsIndexing] = useState(false);
 
   const resolvedFolder = useCallback(() => {
     return folder.toLowerCase() === 'inbox'
@@ -97,17 +109,12 @@ export default function Inbox() {
     setMessages([]);
     setSelectedUid(null);
     setActiveMessage(null);
-    setInlineMode(null);
+    
     setPage(1);
     loadMessages(1);
   }, [folder, searchQuery]); // Re-run if folder or search query changes
 
   // Scroll inline compose into view when opened
-  useEffect(() => {
-    if (inlineMode && inlineRef.current) {
-      setTimeout(() => inlineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-    }
-  }, [inlineMode]);
 
   const loadMessages = async (pageToLoad: number) => {
     setLoading(true);
@@ -179,7 +186,7 @@ export default function Inbox() {
   const handleSelectMessage = async (uid: number) => {
     setSelectedUid(uid);
     setLoadingMessage(true);
-    setInlineMode(null);
+    
     try {
       // If we are in search mode, the message might be from a different folder (e.g. Sent).
       // We stored the original folder in mappedMessages
@@ -250,17 +257,16 @@ export default function Inbox() {
   };
 
   const openReply = () => {
+    if (!activeMessage) return;
     setInlineTo(activeMessage.from);
-    const quoted = buildQuotedBlock(activeMessage);
-    inlineEditor?.commands.setContent(`<p></p>${quoted}`);
+    inlineEditor?.commands.setContent(`<p></p>${buildQuotedBlock(activeMessage)}`);
     setInlineMode('reply');
   };
 
   const openForward = () => {
     if (!activeMessage) return;
     setInlineTo('');
-    const quoted = buildForwardBlock(activeMessage);
-    inlineEditor?.commands.setContent(`<p></p>${quoted}`);
+    inlineEditor?.commands.setContent(`<p></p>${buildForwardBlock(activeMessage)}`);
     setInlineMode('forward');
   };
 
@@ -298,12 +304,38 @@ export default function Inbox() {
       });
 
       alert('Email queued for sending!');
-      setInlineMode(null);
+
       inlineEditor?.commands.clearContent();
+      setInlineMode(null);
     } catch (err) {
       alert('Failed to send email');
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleAiAction = async (action: string) => {
+    setShowAiMenu(false);
+    if (!inlineEditor) return;
+
+    const currentText = inlineEditor.getHTML();
+    if (!currentText || currentText === '<p></p>') {
+        alert('Please write some rough notes or text first before using AI.');
+        return;
+    }
+
+    setIsAiLoading(true);
+    try {
+        const { aiApi } = await import('../lib/api');
+        const response = await aiApi.assist(currentText, action, activeMessage?.body_text || activeMessage?.body_html || '');
+        if (response.result) {
+            inlineEditor.commands.setContent(response.result);
+        }
+    } catch (err: any) {
+        console.error("AI Error:", err);
+        alert(err.response?.data?.error || 'AI generation failed.');
+    } finally {
+        setIsAiLoading(false);
     }
   };
 
@@ -689,9 +721,9 @@ export default function Inbox() {
 
             {/* Inline Reply / Forward Compose — appears below email body */}
             {inlineMode && (
-              <div ref={inlineRef} className="mx-8 mb-8 border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+              <div ref={inlineRef} className="mx-8 mb-8 border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
                 {/* Compose header */}
-                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200 shrink-0">
                   <span className="text-sm font-semibold text-gray-700 capitalize">
                     {inlineMode === 'reply' ? '↩ Reply' : '↪ Forward'}
                   </span>
@@ -701,7 +733,7 @@ export default function Inbox() {
                 </div>
 
                 {/* To field */}
-                <div className="flex items-center px-4 py-2 border-b border-gray-100">
+                <div className="flex items-center px-4 py-2 border-b border-gray-100 shrink-0">
                   <span className="text-xs text-gray-500 w-8 shrink-0">To</span>
                   <input
                     type="email"
@@ -713,13 +745,58 @@ export default function Inbox() {
                   />
                 </div>
 
+                {/* TipTap Toolbar for Inline */}
+                <div className="bg-gray-50 border-b border-gray-200 px-2 py-1.5 shrink-0 flex flex-wrap gap-0.5 items-center select-none" onMouseDown={(e) => e.preventDefault()}>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); setShowAiMenu(!showAiMenu); }}
+                      className={clsx(
+                        "flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors mr-1 border",
+                        showAiMenu ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-gradient-to-r from-purple-50 to-fuchsia-50 text-purple-700 hover:from-purple-100 hover:to-fuchsia-100 border-purple-100"
+                      )}
+                      title="AI Writing Assistant"
+                    >
+                      {isAiLoading ? <div className="w-3.5 h-3.5 animate-spin border-2 border-purple-400 border-t-purple-700 rounded-full" /> : <span>🪄</span>}
+                      AI Assist
+                    </button>
+                    {showAiMenu && (
+                      <div className="absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 shadow-xl rounded-lg py-1 z-[60] text-sm overflow-hidden">
+                        <button className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700" onMouseDown={(e) => { e.preventDefault(); handleAiAction('reply'); }}>
+                          🪄 Draft a Reply
+                        </button>
+                        <button className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700 border-t border-gray-100" onMouseDown={(e) => { e.preventDefault(); handleAiAction('professional'); }}>
+                          👔 Professional
+                        </button>
+                        <button className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700" onMouseDown={(e) => { e.preventDefault(); handleAiAction('friendly'); }}>
+                          😊 Friendly
+                        </button>
+                        <button className="w-full text-left px-4 py-2 hover:bg-purple-50 text-gray-700 hover:text-purple-700" onMouseDown={(e) => { e.preventDefault(); handleAiAction('shorter'); }}>
+                          ✂️ Shorter
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="w-px h-4 bg-gray-300 mx-1" />
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().undo().run() }} title="Undo" className="p-1.5 rounded hover:bg-gray-200 text-gray-700"><span className="text-xs">↶</span></button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().redo().run() }} title="Redo" className="p-1.5 rounded hover:bg-gray-200 text-gray-700"><span className="text-xs">↷</span></button>
+                  <div className="w-px h-4 bg-gray-300 mx-1" />
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().toggleBold().run() }} title="Bold" className={clsx("p-1.5 rounded hover:bg-gray-200 text-gray-700", inlineEditor?.isActive('bold') && 'bg-gray-200')}><strong className="font-serif">B</strong></button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().toggleItalic().run() }} title="Italic" className={clsx("p-1.5 rounded hover:bg-gray-200 text-gray-700", inlineEditor?.isActive('italic') && 'bg-gray-200')}><em className="font-serif">I</em></button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().toggleStrike().run() }} title="Strikethrough" className={clsx("p-1.5 rounded hover:bg-gray-200 text-gray-700", inlineEditor?.isActive('strike') && 'bg-gray-200')}><span className="line-through font-serif">S</span></button>
+                  <div className="w-px h-4 bg-gray-300 mx-1" />
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().toggleBulletList().run() }} title="Bullet List" className={clsx("p-1.5 rounded hover:bg-gray-200 text-gray-700", inlineEditor?.isActive('bulletList') && 'bg-gray-200')}><span className="text-xs px-1">•—</span></button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().toggleOrderedList().run() }} title="Numbered List" className={clsx("p-1.5 rounded hover:bg-gray-200 text-gray-700", inlineEditor?.isActive('orderedList') && 'bg-gray-200')}><span className="text-xs px-1">1.—</span></button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); inlineEditor?.chain().focus().toggleBlockquote().run() }} title="Quote" className={clsx("p-1.5 rounded hover:bg-gray-200 text-gray-700", inlineEditor?.isActive('blockquote') && 'bg-gray-200')}><span className="text-xs">”</span></button>
+                </div>
+
                 {/* TipTap Editor */}
-                <div className="bg-white cursor-text" onClick={() => inlineEditor?.commands.focus()}>
+                <div className="bg-white cursor-text min-h-[150px] overflow-y-auto" onClick={() => inlineEditor?.commands.focus()}>
                   <EditorContent editor={inlineEditor} />
                 </div>
 
                 {/* Footer actions */}
-                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t border-gray-200">
+                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t border-gray-200 shrink-0">
                   <button
                     onClick={handleInlineSend}
                     disabled={isSending}
@@ -737,6 +814,17 @@ export default function Inbox() {
           </div>
         )}
       </div>
+
+      {/* Pop up the robust Compose Modal for New Message etc */}
+      {showCompose && (
+        <ComposeModal
+            initialTo={composeInitialTo}
+            initialSubject={composeInitialSubject}
+            initialBody={composeInitialBody}
+            onClose={() => setShowCompose(false)}
+        />
+      )}
     </div>
   );
 }
+

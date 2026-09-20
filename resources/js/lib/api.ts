@@ -91,6 +91,11 @@ export const smtpApi = {
   sendEmail: (data: any) => api.post('/webmail/send', data).then(res => res.data),
 };
 
+export const aiApi = {
+  assist: (text: string, action: string, context?: string) =>
+    api.post('/webmail/ai/assist', { text, action, context }).then(res => res.data),
+};
+
 export const adminApi = {
   // Domains
   getDomains: () => api.get('/admin/domains').then(res => res.data),
