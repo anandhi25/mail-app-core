@@ -8,13 +8,14 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Webklex\IMAP\Facades\Client;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Log;
 
 class ProcessMailSync implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 3600; // Allow 1 hour max execution (syncing can be very slow)
+    public $timeout = 3600 * 24; // Allow 24 hours max execution for large mailboxes
 
     public function __construct(public int $syncJobId) {}
 
@@ -28,112 +29,89 @@ class ProcessMailSync implements ShouldQueue
         $syncJob->update(['status' => 'processing']);
 
         try {
-            // 1. Connect to Source (e.g. Old Zimbra)
-            $sourceClient = Client::make([
-                'host' => $syncJob->source_host,
-                'port' => $syncJob->source_port,
-                'encryption' => $syncJob->source_encryption === 'false' ? false : $syncJob->source_encryption,
-                'validate_cert' => false,
-                'username' => $syncJob->source_username,
-                'password' => decrypt($syncJob->source_password),
-                'protocol' => 'imap',
-            ]);
-            $sourceClient->connect();
+            $sourcePassword = decrypt($syncJob->source_password);
+            $localPassword = decrypt($syncJob->local_password);
 
-            // 2. Connect to Destination (Local Dovecot)
-            $destClient = Client::make([
-                'host' => config('imap.accounts.default.host'),
-                'port' => config('imap.accounts.default.port'),
-                'encryption' => config('imap.accounts.default.encryption'),
-                'validate_cert' => false,
-                'username' => $syncJob->user->email,
-                'password' => decrypt($syncJob->local_password), // Raw password from admin form
-                'protocol' => 'imap',
-            ]);
-            $destClient->connect();
+            // Format host parameters for imapsync
+            $host1Args = [
+                '--host1', $syncJob->source_host,
+                '--user1', $syncJob->source_username,
+                '--port1', (string) $syncJob->source_port,
+            ];
 
-            // 3. Count total messages across primary folders
-            $foldersToSync = ['INBOX', 'Sent', 'Drafts', 'Junk', 'Spam', 'Trash', 'Archive'];
-            $sourceFolders = $sourceClient->getFolders(false);
-
-            $totalMessages = 0;
-            $foldersMap = []; // source_folder_name => dest_folder_name
-
-            foreach ($sourceFolders as $folder) {
-                // Determine mapped folder name. E.g. 'Junk' on Zimbra -> 'Spam' on Dovecot
-                $destName = $folder->name;
-                if (strtolower($destName) === 'junk') {
-                    $destName = 'Spam';
-                }
-
-                if (in_array($folder->name, $foldersToSync) || in_array($destName, $foldersToSync)) {
-                    $count = $folder->messages()->whereAll()->count();
-                    $totalMessages += $count;
-                    $foldersMap[$folder->name] = $destName;
-                }
+            // Add SSL arg based on settings
+            if ($syncJob->source_encryption === 'ssl' || $syncJob->source_encryption === 'tls') {
+                $host1Args[] = '--ssl1';
+            } else {
+                $host1Args[] = '--nossl1';
             }
 
-            $syncJob->update(['total_messages' => $totalMessages, 'synced_messages' => 0]);
+            // Host 2 (Local Dovecot)
+            $host2Args = [
+                '--host2', '127.0.0.1', // Assuming local Dovecot
+                '--user2', $syncJob->user->email,
+                '--port2', '143', // Local port, adjust if your internal dovecot is on 993
+                '--nossl2', // Safe inside localhost
+                '--automap',
+                '--skipcrossduplicates'
+            ];
 
-            $syncedCount = 0;
+            // Build full command array
+            $command = array_merge(
+                ['imapsync'],
+                $host1Args,
+                $host2Args
+            );
 
-            // 4. Migrate messages
-            foreach ($foldersMap as $sourceName => $destName) {
-                $srcFolder = $sourceClient->getFolder($sourceName);
+            // Output log file path
+            $logPath = storage_path("logs/imapsync-{$syncJob->id}-" . time() . ".log");
 
-                // Ensure dest folder exists
-                try {
-                    $destClient->createFolder($destName);
-                } catch (\Exception) {
-                    // Ignore if already exists
-                }
+            // We must pass passwords via env variables instead of arguments for security
+            // but for simplicity of CLI tool, we can use the --passfile or environment approach.
+            // imapsync supports --passfile1 and --passfile2.
+            $passfile1 = storage_path("app/private/sync_{$syncJob->id}_pass1.txt");
+            $passfile2 = storage_path("app/private/sync_{$syncJob->id}_pass2.txt");
 
-                $destFolder = $destClient->getFolder($destName);
+            file_put_contents($passfile1, $sourcePassword);
+            file_put_contents($passfile2, $localPassword);
 
-                // Fetch ALL messages from source with full body and attachments for migration
-                $messages = $srcFolder->query()->whereAll()->setFetchBody(true)->get();
+            // Add passfiles to command
+            $command[] = '--passfile1';
+            $command[] = escapeshellarg($passfile1);
+            $command[] = '--passfile2';
+            $command[] = escapeshellarg($passfile2);
 
-                foreach ($messages as $message) {
-                    // Extract Raw RFC822 string (contains everything: headers, body, attachments)
-                    $rawEmail = $message->getRawBody();
+            // Execute the process (imapsync)
+            $processResult = Process::timeout($this->timeout)->run(implode(' ', $command));
 
-                    // Re-construct flags
-                    $flags = [];
-                    if ($message->hasFlag('seen')) {
-                        $flags[] = '\\Seen';
-                    }
-                    if ($message->hasFlag('flagged')) {
-                        $flags[] = '\\Flagged';
-                    }
-                    if ($message->hasFlag('answered')) {
-                        $flags[] = '\\Answered';
-                    }
-                    if ($message->hasFlag('draft')) {
-                        $flags[] = '\\Draft';
-                    }
+            // Remove temporary password files
+            @unlink($passfile1);
+            @unlink($passfile2);
 
-                    // Append directly to destination
-                    $destFolder->appendMessage($rawEmail, $flags, $message->getDate()[0]->format('d-M-Y H:i:s O'));
+            if ($processResult->successful()) {
+                // Determine synced messages count from the log output if possible
+                // (Optional: parsing output to find "Copied X messages")
+                $output = $processResult->output();
 
-                    $syncedCount++;
+                // Write output to log for debugging
+                file_put_contents($logPath, $output);
 
-                    // Update DB every 10 messages to prevent too many DB writes
-                    if ($syncedCount % 10 === 0) {
-                        $syncJob->update(['synced_messages' => $syncedCount]);
-                    }
-                }
+                $syncJob->update([
+                    'status' => 'completed',
+                    'local_password' => null, // Security: remove plaintext password
+                    'error_log' => "Sync log saved to: {$logPath}",
+                ]);
+            } else {
+                // Imapsync failed
+                $errorOutput = $processResult->errorOutput() ?: $processResult->output();
+                file_put_contents($logPath, $errorOutput);
+
+                $syncJob->update([
+                    'status' => 'failed',
+                    'error_log' => "imapsync error. Log: {$logPath}\n" . substr($errorOutput, 0, 1000),
+                    'local_password' => null,
+                ]);
             }
-
-            // Cleanup & Mark Done
-            $syncJob->update([
-                'status' => 'completed',
-                'synced_messages' => $syncedCount,
-                'local_password' => null, // Security: remove plaintext password
-            ]);
-
-            $sourceClient->disconnect();
-            $destClient->disconnect();
-
         } catch (\Exception $e) {
             $syncJob->update([
                 'status' => 'failed',

@@ -39,13 +39,21 @@ class SmtpController extends Controller
      */
     public function getDrafts(Request $request): JsonResponse
     {
+        \Log::info('getDrafts called: step 1 - initializing');
         try {
             $service = $this->makeDraftService($request);
+            \Log::info('getDrafts called: step 2 - service made');
+
             $drafts = $service->getDrafts();
+            \Log::info('getDrafts called: step 3 - drafts fetched', ['count' => count($drafts)]);
 
             return response()->json(['drafts' => $drafts]);
         } catch (\Exception $e) {
+            \Log::error('getDrafts Error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
             return response()->json(['error' => $e->getMessage()], 500);
+        } catch (\Throwable $t) {
+            \Log::error('getDrafts Throwable Error: ' . $t->getMessage(), ['trace' => $t->getTraceAsString()]);
+            return response()->json(['error' => 'Fatal Error: ' . $t->getMessage()], 500);
         }
     }
 
@@ -151,20 +159,6 @@ class SmtpController extends Controller
         );
 
         return response()->json(['message' => 'Email queued for sending successfully']);
-    }
-
-    /**
-     * List all drafts from the IMAP Drafts folder.
-     */
-    public function getDrafts(Request $request): JsonResponse
-    {
-        try {
-            $service = $this->makeDraftService($request);
-
-            return response()->json(['drafts' => $service->listDrafts()]);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
-        }
     }
 
     /**

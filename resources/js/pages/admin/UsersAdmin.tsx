@@ -27,8 +27,6 @@ export default function UsersAdmin() {
   useEffect(() => {
     if (selectedDomain) {
       loadUsers();
-      const t = setInterval(loadUsers, 5000); // Poll for sync status
-      return () => clearInterval(t);
     } else {
       setUsers([]);
     }

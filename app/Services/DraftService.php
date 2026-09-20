@@ -26,7 +26,13 @@ class DraftService
             return [];
         }
 
-        $messages = $folder->query()->all()->get();
+        // IMPORTANT: Prevent Out of Memory by disabling body fetch.
+        // We only need headers (Subject, Date, To) for listing drafts.
+        $messages = $folder->query()
+            ->all()
+            ->setFetchBody(false)
+            ->get();
+
         $result = [];
         foreach ($messages as $message) {
             $result[] = [
@@ -34,8 +40,8 @@ class DraftService
                 'subject' => $message->getSubject()[0] ?? '(no subject)',
                 'to' => array_map(fn ($t) => $t->mail, $message->getTo()->toArray()),
                 'date' => $message->getDate()[0]->format('Y-m-d H:i:s'),
-                // For list preview we only fetch raw body
-                'body_preview' => mb_substr(strip_tags($message->getTextBody() ?? ''), 0, 100),
+                // Disable body preview for drafts listing as fetching body triggers OOM
+                'body_preview' => '',
             ];
         }
 
@@ -89,7 +95,11 @@ class DraftService
     public function listDrafts(): array
     {
         $folder = $this->client->getFolder('Drafts');
-        $messages = $folder->messages()->all()->get();
+        // Prevent OOM by not fetching full bodies
+        $messages = $folder->query()
+            ->all()
+            ->setFetchBody(false)
+            ->get();
 
         $drafts = [];
         foreach ($messages as $message) {

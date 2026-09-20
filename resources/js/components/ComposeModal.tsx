@@ -24,6 +24,7 @@ interface ComposeModalProps {
   initialTo?: string;
   initialSubject?: string;
   initialBody?: string;
+  draftUid?: number;
 }
 
 interface Attachment {
@@ -85,6 +86,7 @@ export default function ComposeModal({
   initialTo = '',
   initialSubject = '',
   initialBody,
+  draftUid,
 }: ComposeModalProps) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -195,6 +197,7 @@ export default function ComposeModal({
     setIsSending(true);
     try {
       await smtpApi.sendEmail({
+        uid: draftUid,
         to: [formData.to],
         subject: formData.subject,
         body: editor?.getHTML() || '',
@@ -221,6 +224,7 @@ export default function ComposeModal({
     }
     try {
       await smtpApi.saveDraft({
+        uid: draftUid,
         to: formData.to ? [formData.to] : [],
         subject: formData.subject,
         body: editor?.getHTML() || '',

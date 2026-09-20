@@ -1,22 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import { smtpApi } from '../lib/api';
+import { smtpApi, imapApi } from '../lib/api';
 import { format, isToday } from 'date-fns';
 import clsx from 'clsx';
-import { Edit3, Trash2, Send } from 'lucide-react';
+import { Edit3, Trash2, Loader2 } from 'lucide-react';
+import ComposeModal from '../components/ComposeModal';
 
 interface Draft {
   uid: number;
   subject: string;
   to: string[];
   date: string;
-  body?: string; // We might not have body in list view, but defined for type safety
 }
 
 export default function Drafts() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Track selected draft metadata from list
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
   const [activeDraft, setActiveDraft] = useState<Draft | null>(null);
+
+  // Track full content loaded from IMAP
+  const [loadingContent, setLoadingContent] = useState(false);
+  const [fullDraftContent, setFullDraftContent] = useState<{to: string, subject: string, body: string} | null>(null);
 
   useEffect(() => {
     loadDrafts();
@@ -37,13 +43,44 @@ export default function Drafts() {
     }
   };
 
-  const handleSelectDraft = (draft: Draft) => {
+  const handleSelectDraft = async (draft: Draft) => {
     setSelectedUid(draft.uid);
     setActiveDraft(draft);
+    setFullDraftContent(null); // clear old content
+    setLoadingContent(true);
+
+    try {
+      // Fetch full body from the server using IMAP getMessageDetail endpoint
+      const res = await imapApi.getMessageDetail('Drafts', draft.uid.toString());
+
+      let toField = draft.to?.join(', ') || '';
+      // Sometimes IMAP getMessageDetail returns more accurate To headers
+      if (res.message?.to && Array.isArray(res.message.to)) {
+          toField = res.message.to.map((t: any) => t.mail || t).join(', ');
+      } else if (res.message?.to) {
+          toField = res.message.to;
+      }
+
+      setFullDraftContent({
+        to: toField,
+        subject: res.message?.subject || draft.subject || '',
+        body: res.message?.html_body || res.message?.text_body || ''
+      });
+    } catch (err) {
+      console.error('Failed to load full draft body', err);
+      // Fallback if API fails
+      setFullDraftContent({
+        to: draft.to?.join(', ') || '',
+        subject: draft.subject,
+        body: ''
+      });
+    } finally {
+      setLoadingContent(false);
+    }
   };
 
-  const handleDelete = async (uid: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = async (uid: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!confirm('Are you sure you want to delete this draft?')) return;
 
     try {
@@ -52,36 +89,11 @@ export default function Drafts() {
       if (selectedUid === uid) {
         setSelectedUid(null);
         setActiveDraft(null);
+        setFullDraftContent(null);
       }
     } catch (err) {
       console.error('Failed to delete draft', err);
       alert('Failed to delete draft');
-    }
-  };
-
-  const handleSend = async () => {
-    if (!activeDraft) return;
-    if (!activeDraft.to || activeDraft.to.length === 0 || !activeDraft.to[0]) {
-      alert('Please specify at least one recipient (To)');
-      return;
-    }
-
-    try {
-      await smtpApi.sendEmail({
-        uid: activeDraft.uid,
-        to: activeDraft.to,
-        subject: activeDraft.subject,
-        body: 'Email body from draft (Note: full body reading requires a Draft detail API)',
-        // Note: For a fully functioning editor we'd need an endpoint to read the full draft body.
-        // IMAP Drafts API we built only returns list info without body.
-      });
-      alert('Email queued for sending');
-      setDrafts(prev => prev.filter(d => d.uid !== activeDraft.uid));
-      setSelectedUid(null);
-      setActiveDraft(null);
-    } catch (err) {
-      console.error('Failed to send draft', err);
-      alert('Failed to send email');
     }
   };
 
@@ -92,7 +104,7 @@ export default function Drafts() {
   };
 
   return (
-    <div className="flex h-full w-full bg-white">
+    <div className="flex h-full w-full bg-white relative">
       {/* Draft List Panel */}
       <div className="w-1/3 min-w-[320px] max-w-[400px] border-r border-gray-200 flex flex-col h-full bg-gray-50/50">
         <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-white sticky top-0 z-10">
@@ -144,59 +156,36 @@ export default function Drafts() {
       </div>
 
       {/* Draft Editor/Preview Panel */}
-      <div className="flex-1 flex flex-col h-full bg-white overflow-hidden">
+      <div className="flex-1 h-full bg-white overflow-hidden flex flex-col relative z-0">
         {!activeDraft ? (
-          <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50/30">
-            Select a draft to view
+          <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50/30 h-full">
+            Select a draft to continue editing
           </div>
-        ) : (
-          <>
-            {/* Header */}
-            <div className="px-8 py-6 border-b border-gray-100 shrink-0 bg-white">
-              <div className="flex justify-between items-start mb-6">
-                <h1 className="text-2xl font-semibold text-gray-900 leading-tight">
-                  {activeDraft.subject}
-                </h1>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleSend}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-md transition-colors"
-                  >
-                    <Send className="w-4 h-4" />
-                    Send
-                  </button>
-                  <button
-                    onClick={(e) => handleDelete(activeDraft.uid, e)}
-                    className="p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 rounded-md transition-colors"
-                    title="Discard"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 text-sm">
-                <div className="flex">
-                  <span className="w-12 text-gray-500 font-medium">To:</span>
-                  <span className="text-gray-900">{activeDraft.to?.join(', ') || '(empty)'}</span>
-                </div>
-                <div className="flex">
-                  <span className="w-12 text-gray-500 font-medium">Date:</span>
-                  <span className="text-gray-500">
-                    {activeDraft.date ? format(new Date(activeDraft.date), 'MMM d, yyyy, h:mm a') : 'Unknown'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Placeholder for Editor */}
-            <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center text-gray-400 bg-gray-50/30">
-              <Edit3 className="w-12 h-12 mb-4 text-gray-300" />
-              <p className="mb-2">Draft editing requires fetching the full email body.</p>
-              <p className="text-sm">Currently showing metadata only.</p>
-            </div>
-          </>
-        )}
+        ) : loadingContent ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-400 bg-gray-50/30 h-full">
+             <Loader2 className="w-8 h-8 animate-spin mb-4 text-blue-500" />
+             <p>Loading draft content...</p>
+          </div>
+        ) : fullDraftContent ? (
+          <div className="w-full h-full [&>div]:static [&>div]:h-full [&>div]:w-full [&>div]:bg-white [&>div]:border-none [&>div]:shadow-none [&>div]:rounded-none">
+            {/*
+              We reuse the ComposeModal but style it via parent CSS above
+              to fill the entire right pane instead of acting like a popup.
+            */}
+            <ComposeModal
+              draftUid={activeDraft.uid}
+              initialTo={fullDraftContent.to}
+              initialSubject={fullDraftContent.subject}
+              initialBody={fullDraftContent.body}
+              onClose={() => {
+                // When they click X, we can just clear the selection or reload list
+                setSelectedUid(null);
+                setActiveDraft(null);
+                loadDrafts();
+              }}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );
