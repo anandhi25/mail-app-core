@@ -40,11 +40,16 @@ export default function SearchBar() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const debouncedQuery = useDebounce(query.trim(), 300);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const isInput = containerRef.current?.contains(target);
+      const isDropdown = dropdownRef.current?.contains(target);
+
+      if (!isInput && !isDropdown) {
         setIsOpen(false);
       }
     };
@@ -172,8 +177,9 @@ export default function SearchBar() {
 
   const dropdown = isOpen ? (
     <div
-      style={dropdownStyle}
-      className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+      ref={dropdownRef}
+      style={{ ...dropdownStyle, zIndex: 9999 }}
+      className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden fixed"
     >
       {/* Indexing state */}
       {indexing && (
