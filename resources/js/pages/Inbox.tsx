@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { imapApi, smtpApi } from '../lib/api';
 import { Message, MessageAttachment } from '../types';
 import { format, isToday } from 'date-fns';
@@ -52,6 +52,9 @@ function ConfirmDialog({ message, onConfirm, onCancel }: {
 
 export default function Inbox() {
   const { folder = 'INBOX' } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialUid = searchParams.get('uid');
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUid, setSelectedUid] = useState<number | null>(null);
@@ -129,6 +132,21 @@ export default function Inbox() {
     const timer = setTimeout(() => loadMessages(1), 5000);
     return () => clearTimeout(timer);
   }, [isIndexing]);
+
+  // Listen for UID in query params (useful when clicking from search results)
+  useEffect(() => {
+    if (initialUid && !loading && messages.length > 0) {
+      const uidNum = parseInt(initialUid, 10);
+      if (selectedUid !== uidNum) {
+        handleSelectMessage(uidNum);
+      }
+
+      // Clear the query param so refreshing doesn't force re-open it
+      searchParams.delete('uid');
+      searchParams.delete('folder');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [initialUid, loading, messages.length]);
 
   const handleNextPage = () => { if (hasMore) loadMessages(page + 1); };
   const handlePrevPage = () => { if (page > 1) loadMessages(page - 1); };
