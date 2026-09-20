@@ -11,6 +11,38 @@ class DraftService
     public function __construct(private readonly Client $client) {}
 
     /**
+     * Retrieve all drafts from the Drafts folder.
+     */
+    public function getDrafts(): array
+    {
+        try {
+            $folder = $this->client->getFolder('Drafts');
+        } catch (\Exception $e) {
+            // Some servers use different names
+            $folder = $this->client->getFolder('.Drafts');
+        }
+
+        if (! $folder) {
+            return [];
+        }
+
+        $messages = $folder->query()->all()->get();
+        $result = [];
+        foreach ($messages as $message) {
+            $result[] = [
+                'uid' => $message->getUid(),
+                'subject' => $message->getSubject()[0] ?? '(no subject)',
+                'to' => array_map(fn ($t) => $t->mail, $message->getTo()->toArray()),
+                'date' => $message->getDate()[0]->format('Y-m-d H:i:s'),
+                // For list preview we only fetch raw body
+                'body_preview' => mb_substr(strip_tags($message->getTextBody() ?? ''), 0, 100),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Append a new draft to the IMAP Drafts folder.
      * Returns the UID of the newly appended message.
      */

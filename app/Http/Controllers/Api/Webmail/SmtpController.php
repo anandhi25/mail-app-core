@@ -35,6 +35,21 @@ class SmtpController extends Controller
     }
 
     /**
+     * Get a list of drafts from the Drafts folder.
+     */
+    public function getDrafts(Request $request): JsonResponse
+    {
+        try {
+            $service = $this->makeDraftService($request);
+            $drafts = $service->getDrafts();
+
+            return response()->json(['drafts' => $drafts]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Save or update a draft in the IMAP Drafts folder.
      */
     public function saveDraft(Request $request): JsonResponse
