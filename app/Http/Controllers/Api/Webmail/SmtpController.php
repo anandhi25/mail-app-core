@@ -25,7 +25,7 @@ class SmtpController extends Controller
             'port' => config('imap.accounts.default.port'),
             'encryption' => config('imap.accounts.default.encryption'),
             'validate_cert' => config('imap.accounts.default.validate_cert'),
-            'username' => explode('@', $user->email)[0],
+            'username' => $user->email,
             'password' => decrypt($password),
             'protocol' => 'imap',
         ]);

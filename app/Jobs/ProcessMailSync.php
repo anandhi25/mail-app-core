@@ -46,7 +46,7 @@ class ProcessMailSync implements ShouldQueue
                 'port' => config('imap.accounts.default.port'),
                 'encryption' => config('imap.accounts.default.encryption'),
                 'validate_cert' => false,
-                'username' => explode('@', $syncJob->user->email)[0],
+                'username' => $syncJob->user->email,
                 'password' => decrypt($syncJob->local_password), // Raw password from admin form
                 'protocol' => 'imap',
             ]);

@@ -67,7 +67,7 @@ class SendWebmailJob implements ShouldQueue
             'port' => config('imap.accounts.default.port'),
             'encryption' => config('imap.accounts.default.encryption'),
             'validate_cert' => config('imap.accounts.default.validate_cert'),
-            'username' => explode('@', $this->senderEmail)[0],
+            'username' => $this->senderEmail,
             'password' => $this->senderPassword,
             'protocol' => 'imap',
         ]);
