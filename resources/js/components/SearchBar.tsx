@@ -124,11 +124,10 @@ export default function SearchBar() {
 
   const handleSelect = useCallback((result: SearchResult) => {
     setIsOpen(false);
-    setQuery('');
-    // Navigate to the folder and open the message
-    const folder = result.folder.toLowerCase();
-    navigate(`/${folder}?uid=${result.uid}&folder=${encodeURIComponent(result.folder)}`);
-  }, [navigate]);
+    // Kita biarkan query pencarian tetap ada di input bar
+    // Navigate ke folder "search" buatan agar list tengah berubah menjadi hasil pencarian
+    navigate(`/search?q=${encodeURIComponent(debouncedQuery)}&uid=${result.uid}`);
+  }, [navigate, debouncedQuery]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isOpen) return;
@@ -139,8 +138,16 @@ export default function SearchBar() {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex(i => Math.max(i - 1, -1));
-    } else if (e.key === 'Enter' && activeIndex >= 0 && results[activeIndex]) {
-      handleSelect(results[activeIndex]);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIndex >= 0 && results[activeIndex]) {
+        // Buka item spesifik yang di-highlight
+        handleSelect(results[activeIndex]);
+      } else if (debouncedQuery.length >= 2) {
+        // Jika menekan Enter tanpa highlight item, buka list semua pencarian di panel tengah
+        setIsOpen(false);
+        navigate(`/search?q=${encodeURIComponent(debouncedQuery)}`);
+      }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
       inputRef.current?.blur();

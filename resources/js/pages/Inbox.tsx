@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { imapApi, smtpApi } from '../lib/api';
+import { imapApi, smtpApi, searchApi } from '../lib/api';
 import { Message, MessageAttachment } from '../types';
 import { format, isToday } from 'date-fns';
 import clsx from 'clsx';
@@ -90,6 +90,9 @@ export default function Inbox() {
       : folder.charAt(0).toUpperCase() + folder.slice(1).toLowerCase();
   }, [folder]);
 
+  const isSearchMode = folder === 'search';
+  const searchQuery = searchParams.get('q') || '';
+
   useEffect(() => {
     setMessages([]);
     setSelectedUid(null);
@@ -97,7 +100,7 @@ export default function Inbox() {
     setInlineMode(null);
     setPage(1);
     loadMessages(1);
-  }, [folder]);
+  }, [folder, searchQuery]); // Re-run if folder or search query changes
 
   // Scroll inline compose into view when opened
   useEffect(() => {
@@ -109,15 +112,37 @@ export default function Inbox() {
   const loadMessages = async (pageToLoad: number) => {
     setLoading(true);
     try {
-      const res = await imapApi.getMessages(resolvedFolder(), pageToLoad);
-      if (res.indexing) {
-        setIsIndexing(true);
-        setMessages([]);
+      if (isSearchMode && searchQuery) {
+        // If we are in search mode, load results from Meilisearch instead of IMAP
+        const res = await searchApi.search({ q: searchQuery, limit: 50 }); // Load up to 50 results in list
+        setIsIndexing(!!res.indexing);
+        // Map SearchResult to Message format roughly
+        const mappedMessages: Message[] = res.results.map(r => ({
+          uid: parseInt(r.uid, 10),
+          subject: r.subject,
+          from: r.from_name || r.from_address,
+          date: r.sent_at || new Date().toISOString(),
+          is_seen: r.is_seen,
+          has_attachments: r.has_attachment,
+          // We sneak the original folder here so opening it still knows where to look
+          _originalFolder: r.folder,
+        } as any));
+
+        setMessages(mappedMessages);
+        setHasMore(false); // Disable pagination for search right now
+        setPage(1);
       } else {
-        setIsIndexing(false);
-        setMessages(res.messages);
-        setHasMore(res.messages.length === 15);
-        setPage(pageToLoad);
+        // Normal Folder Loading
+        const res = await imapApi.getMessages(resolvedFolder(), pageToLoad);
+        if (res.indexing) {
+          setIsIndexing(true);
+          setMessages([]);
+        } else {
+          setIsIndexing(false);
+          setMessages(res.messages);
+          setHasMore(res.messages.length === 15);
+          setPage(pageToLoad);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -156,7 +181,11 @@ export default function Inbox() {
     setLoadingMessage(true);
     setInlineMode(null);
     try {
-      const fld = resolvedFolder();
+      // If we are in search mode, the message might be from a different folder (e.g. Sent).
+      // We stored the original folder in mappedMessages
+      const msgInfo = messages.find(m => m.uid === uid) as any;
+      const fld = isSearchMode && msgInfo?._originalFolder ? msgInfo._originalFolder : resolvedFolder();
+
       const res = await imapApi.getMessageDetail(fld, uid);
       setActiveMessage(res);
       setMessages(prev => prev.map(m => (m.uid === uid ? { ...m, is_seen: true } : m)));
@@ -438,9 +467,11 @@ export default function Inbox() {
                   onChange={toggleSelectAll}
                   className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer"
                 />
-                <h2 className="font-semibold text-lg text-gray-800 capitalize">{folder}</h2>
+                <h2 className="font-semibold text-lg text-gray-800 capitalize">
+                  {isSearchMode ? 'Search Results' : folder}
+                </h2>
               </div>
-              <span className="text-sm text-gray-500">{messages.length} messages</span>
+              <span className="text-sm text-gray-500">{messages.length} {isSearchMode ? 'found' : 'messages'}</span>
             </div>
           )}
         </div>
@@ -490,7 +521,12 @@ export default function Inbox() {
                         </span>
                       </div>
                       <div className="text-sm text-gray-800 truncate pl-1">{msg.subject}</div>
-                      <div className="text-xs text-gray-500 truncate pl-1">Click to read message...</div>
+                      <div className="text-xs text-gray-500 truncate pl-1">
+                        {isSearchMode && (msg as any)._originalFolder ? (
+                          <span className="inline-block px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium text-[10px] mr-2">{(msg as any)._originalFolder}</span>
+                        ) : null}
+                        Click to read message...
+                      </div>
                     </div>
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <div onClick={e => { e.stopPropagation(); handleDelete(msg.uid); }}
@@ -501,23 +537,25 @@ export default function Inbox() {
                   </div>
                 ))}
               </div>
-              <div className="p-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between sticky bottom-0 z-10">
-                <button
-                  onClick={handlePrevPage}
-                  disabled={page === 1}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded disabled:opacity-50 hover:bg-gray-50"
-                >
-                  &larr; Prev
-                </button>
-                <span className="text-xs text-gray-500">Page {page}</span>
-                <button
-                  onClick={handleNextPage}
-                  disabled={!hasMore}
-                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded disabled:opacity-50 hover:bg-gray-50"
-                >
-                  Next &rarr;
-                </button>
-              </div>
+              {!isSearchMode && (
+                <div className="p-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between sticky bottom-0 z-10">
+                  <button
+                    onClick={handlePrevPage}
+                    disabled={page === 1}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded disabled:opacity-50 hover:bg-gray-50"
+                  >
+                    &larr; Prev
+                  </button>
+                  <span className="text-xs text-gray-500">Page {page}</span>
+                  <button
+                    onClick={handleNextPage}
+                    disabled={!hasMore}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded disabled:opacity-50 hover:bg-gray-50"
+                  >
+                    Next &rarr;
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
