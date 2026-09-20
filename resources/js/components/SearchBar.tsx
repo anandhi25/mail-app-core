@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Search, Loader2, Mail, Paperclip, X, RefreshCw } from 'lucide-react';
@@ -38,9 +38,9 @@ export default function SearchBar() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const debouncedQuery = useDebounce(query.trim(), 300);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click
   useEffect(() => {
@@ -59,16 +59,27 @@ export default function SearchBar() {
 
   // Recalculate dropdown position when open
   useEffect(() => {
-    if (isOpen && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setDropdownStyle({
-        position: 'fixed',
-        top: rect.bottom + 6,
-        left: rect.left,
-        width: rect.width,
-        zIndex: 9999,
-      });
-    }
+    const updatePosition = () => {
+      if (isOpen && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setDropdownStyle({
+          position: 'fixed',
+          top: rect.bottom + 6 + 'px',
+          left: rect.left + 'px',
+          width: rect.width + 'px',
+          zIndex: 9999,
+        });
+      }
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
   }, [isOpen, results, indexing, error]);
 
   // Run search when debounced query changes
@@ -143,37 +154,6 @@ export default function SearchBar() {
     setResults([]);
     setIsOpen(false);
   };
-
-  return (
-    <div ref={containerRef} className="relative max-w-xl w-full">
-      {/* Input */}
-      <div className="relative">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onFocus={() => debouncedQuery.length >= 2 && setIsOpen(true)}
-          onKeyDown={handleKeyDown}
-          placeholder="Search messages..."
-          className="w-full bg-gray-100 border-transparent focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-lg pl-9 pr-9 py-2 text-sm transition-all outline-none border"
-        />
-        {loading && (
-          <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />
-        )}
-        {!loading && query && (
-          <button
-            onClick={() => { setQuery(''); setResults([]); setIsOpen(false); }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-
-    </div>
-  );
 
   const dropdown = isOpen ? (
     <div
@@ -312,6 +292,7 @@ export default function SearchBar() {
           )}
         </div>
       </div>
+
       {createPortal(dropdown, document.body)}
     </>
   );
